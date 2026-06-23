@@ -155,48 +155,46 @@ def fetch_index_daily(pro, ts_code, start_date, end_date):
     return []
 
 
+def _fetch_with_rollback(pro, api_name, trade_date, **kwargs):
+    """通用Tushare数据获取，支持空数据自动回滚前5天"""
+    from datetime import datetime, timedelta
+    dt = datetime.strptime(trade_date, '%Y%m%d')
+    for i in range(6):
+        try_date = (dt - timedelta(days=i)).strftime('%Y%m%d')
+        try:
+            api = getattr(pro, api_name)
+            if api_name == 'moneyflow_hsgt':
+                df = api(start_date=try_date, end_date=try_date, **kwargs)
+            else:
+                df = api(trade_date=try_date, **kwargs)
+            if df is not None and len(df) > 0:
+                if i > 0:
+                    print(f"[INFO] {api_name}({trade_date}) 返回空，回滚到 {try_date}")
+                return df.to_dict('records')
+        except Exception as e:
+            print(f"[WARN] {api_name}({try_date}) 失败: {e}")
+            break  # 接口错误直接退出（如权限问题），不回滚
+    return []
+
+
 def fetch_moneyflow(pro, trade_date):
     """获取资金流向数据"""
-    try:
-        df = pro.moneyflow(trade_date=trade_date)
-        if df is not None and len(df) > 0:
-            return df.to_dict('records')
-    except Exception as e:
-        print(f"[ERROR] 获取资金流向失败: {e}")
-    return []
+    return _fetch_with_rollback(pro, 'moneyflow', trade_date)
 
 
 def fetch_top_list(pro, trade_date):
     """获取龙虎榜数据"""
-    try:
-        df = pro.top_list(trade_date=trade_date)
-        if df is not None and len(df) > 0:
-            return df.to_dict('records')
-    except Exception as e:
-        print(f"[ERROR] 获取龙虎榜失败: {e}")
-    return []
+    return _fetch_with_rollback(pro, 'top_list', trade_date)
 
 
 def fetch_top_inst(pro, trade_date):
     """获取龙虎榜机构明细"""
-    try:
-        df = pro.top_inst(trade_date=trade_date)
-        if df is not None and len(df) > 0:
-            return df.to_dict('records')
-    except Exception as e:
-        print(f"[ERROR] 获取龙虎榜机构明细失败: {e}")
-    return []
+    return _fetch_with_rollback(pro, 'top_inst', trade_date)
 
 
 def fetch_hsgt(pro, trade_date):
     """获取沪深港通资金流向"""
-    try:
-        df = pro.moneyflow_hsgt(start_date=trade_date, end_date=trade_date)
-        if df is not None and len(df) > 0:
-            return df.to_dict('records')
-    except Exception as e:
-        print(f"[ERROR] 获取沪深港通失败: {e}")
-    return []
+    return _fetch_with_rollback(pro, 'moneyflow_hsgt', trade_date)
 
 
 def fetch_limit_list(pro, trade_date):
@@ -224,36 +222,13 @@ def fetch_limit_list(pro, trade_date):
 
 
 def fetch_margin(pro, trade_date):
-    """获取融资融券数据
-    注意: Tushare trade_cal 可能标记错误（如调休日标记为交易日但无实际数据）
-    如果当天返回空，自动回滚到上一个有数据的日子
-    """
-    # 尝试当前日期和前5个交易日
-    from datetime import datetime, timedelta
-    dt = datetime.strptime(trade_date, '%Y%m%d')
-    for i in range(6):
-        try_date = (dt - timedelta(days=i)).strftime('%Y%m%d')
-        try:
-            df = pro.margin(trade_date=try_date)
-            if df is not None and len(df) > 0:
-                if i > 0:
-                    print(f"[INFO] margin({trade_date}) 返回空，回滚到 {try_date} 获取数据")
-                return df.to_dict('records')
-        except Exception as e:
-            print(f"[WARN] margin({try_date}) 失败: {e}")
-    print(f"[WARN] margin 在 {trade_date} 及前5天均无数据")
-    return []
+    """获取融资融券数据（支持空数据自动回滚）"""
+    return _fetch_with_rollback(pro, 'margin', trade_date)
 
 
 def fetch_daily_basic(pro, trade_date):
-    """获取每日指标"""
-    try:
-        df = pro.daily_basic(trade_date=trade_date)
-        if df is not None and len(df) > 0:
-            return df.to_dict('records')
-    except Exception as e:
-        print(f"[ERROR] 获取每日指标失败: {e}")
-    return []
+    """获取每日指标（支持空数据自动回滚）"""
+    return _fetch_with_rollback(pro, 'daily_basic', trade_date)
 
 
 def fetch_limit_list_eastmoney(trade_date):
@@ -826,45 +801,85 @@ def fetch_news_headlines(data_quality, trade_date):
     """
     获取官方媒体头条，带降级机制
     数据源：上海证券报、证券时报、人民日报、新闻联播
+    新闻联播和人民日报需要日期回滚：当天页面可能还没发布
     """
     result = {}
+    from datetime import datetime, timedelta
 
-    # 人民日报 URL: http://paper.people.com.cn/rmrb/pc/layout/202606/22/node_01.html
-    rmrb_date_path = f"{trade_date[:4]}{trade_date[4:6]}/{trade_date[6:8]}"
+    # 人民日报和新闻联播需要尝试多个日期（当天可能未发布）
+    dt = datetime.strptime(trade_date, '%Y%m%d')
 
-    news_sources = {
+    # 上海证券报、证券时报（首页，不需要日期）
+    static_sources = {
         "上海证券报": ("https://www.cnstock.com/", "cnstock"),
         "证券时报": ("https://www.stcn.com/", "stcn"),
-        "人民日报": (f"http://paper.people.com.cn/rmrb/pc/layout/{rmrb_date_path}/node_01.html", "rmrb"),
-        "新闻联播": (f"https://tv.cctv.cn/lm/xwlb/day/{trade_date}.shtml", "xwlb"),
     }
 
-    for source_name, (url, source_type) in news_sources.items():
+    for source_name, (url, source_type) in static_sources.items():
         try:
             resp = requests.get(url, headers=WEB_HEADERS, timeout=REQUEST_TIMEOUT)
             status_code = resp.status_code
-
             if status_code != 200:
                 raise ValueError(f"HTTP {status_code}")
-
-            # 强制使用 UTF-8 解码（避免自动检测编码错误）
             resp.encoding = 'utf-8'
             titles = _extract_titles_from_html(resp.text, source_type)
             if not titles:
                 raise ValueError("未能从页面提取到有效标题")
-
-            record_quality(data_quality, source_name, "OK", "web_scrape",
-                           len(titles))
-            result[source_name] = {
-                "status": status_code,
-                "titles": titles,
-                "title_count": len(titles),
-            }
+            record_quality(data_quality, source_name, "OK", "web_scrape", len(titles))
+            result[source_name] = {"status": status_code, "titles": titles, "title_count": len(titles)}
         except Exception as e:
             print(f"[WARN] {source_name} 采集失败: {e}")
-            record_quality(data_quality, source_name, "FAILED", "web_scrape",
-                           0, f"采集失败: {e}")
-            result[source_name] = {"error": str(e), "status": getattr(e, 'status', 0)}
+            record_quality(data_quality, source_name, "FAILED", "web_scrape", 0, f"采集失败: {e}")
+            result[source_name] = {"error": str(e), "status": 0}
+
+    # 人民日报（需要日期回滚，最多尝试3天）
+    rmrb_success = False
+    for i in range(3):
+        try_date = (dt - timedelta(days=i)).strftime('%Y%m%d')
+        rmrb_date_path = f"{try_date[:4]}{try_date[4:6]}/{try_date[6:8]}"
+        url = f"http://paper.people.com.cn/rmrb/pc/layout/{rmrb_date_path}/node_01.html"
+        try:
+            resp = requests.get(url, headers=WEB_HEADERS, timeout=REQUEST_TIMEOUT)
+            if resp.status_code != 200:
+                continue
+            resp.encoding = 'utf-8'
+            titles = _extract_titles_from_html(resp.text, "rmrb")
+            if not titles:
+                continue
+            record_quality(data_quality, "人民日报", "OK", "web_scrape", len(titles))
+            result["人民日报"] = {"status": 200, "titles": titles, "title_count": len(titles), "date_used": try_date}
+            rmrb_success = True
+            break
+        except Exception as e:
+            continue
+    if not rmrb_success:
+        print(f"[WARN] 人民日报 采集失败: 3天内均无有效页面")
+        record_quality(data_quality, "人民日报", "FAILED", "web_scrape", 0, "3天内均无有效页面")
+        result["人民日报"] = {"error": "3天内均无有效页面", "status": 0}
+
+    # 新闻联播（需要日期回滚，最多尝试3天）
+    xwlb_success = False
+    for i in range(3):
+        try_date = (dt - timedelta(days=i)).strftime('%Y%m%d')
+        url = f"https://tv.cctv.cn/lm/xwlb/day/{try_date}.shtml"
+        try:
+            resp = requests.get(url, headers=WEB_HEADERS, timeout=REQUEST_TIMEOUT)
+            if resp.status_code != 200:
+                continue
+            resp.encoding = 'utf-8'
+            titles = _extract_titles_from_html(resp.text, "xwlb")
+            if not titles:
+                continue
+            record_quality(data_quality, "新闻联播", "OK", "web_scrape", len(titles))
+            result["新闻联播"] = {"status": 200, "titles": titles, "title_count": len(titles), "date_used": try_date}
+            xwlb_success = True
+            break
+        except Exception as e:
+            continue
+    if not xwlb_success:
+        print(f"[WARN] 新闻联播 采集失败: 3天内均无有效页面")
+        record_quality(data_quality, "新闻联播", "FAILED", "web_scrape", 0, "3天内均无有效页面")
+        result["新闻联播"] = {"error": "3天内均无有效页面", "status": 0}
 
     return result
 
