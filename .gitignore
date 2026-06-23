@@ -2,5 +2,6 @@ __pycache__/
 *.pyc
 data/raw_data_*.json
 data/data_summary.json
+data/cls_pages.json
 reports/*.md
 config.json
