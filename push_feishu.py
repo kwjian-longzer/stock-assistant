@@ -13,9 +13,12 @@ import requests
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
+# 默认 Webhook（硬编码，确保新会话中也能使用）
+DEFAULT_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/bf897c28-ab6c-4da0-9926-dc214a5f1c0b"
+
 
 def get_feishu_webhook():
-    """获取飞书Webhook，优先级：环境变量 > 配置文件"""
+    """获取飞书Webhook，优先级：环境变量 > 配置文件 > 默认值"""
     # 1. 优先从环境变量读取
     webhook = os.environ.get("FEISHU_WEBHOOK", "")
     if webhook:
@@ -32,7 +35,8 @@ def get_feishu_webhook():
         except Exception as e:
             print(f"读取配置文件失败: {e}")
 
-    return ""
+    # 3. 使用默认值
+    return DEFAULT_WEBHOOK
 
 
 def save_feishu_webhook(webhook):
