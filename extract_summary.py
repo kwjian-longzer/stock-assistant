@@ -1,0 +1,919 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+数据摘要提取脚本
+
+从 fetch_data.py 采集的 raw_data_*.json（可能24万行+）中提取关键指标，
+生成一个精炼的 data_summary.json（控制在500行以内），供AI写报告时直接使用。
+
+用法:
+  python extract_summary.py                     # 默认读取 data/raw_data_latest.json
+  python extract_summary.py --file data/raw_data_20260622_evening.json
+  python extract_summary.py --output /tmp/summary.json
+
+输出: data/data_summary.json
+"""
+
+import argparse
+import glob
+import json
+import math
+import os
+import sys
+from collections import defaultdict
+
+# ---------------------------------------------------------------------------
+# 工具函数
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(SCRIPT_DIR, "data")
+
+
+def parse_sina_raw(raw_text):
+    """从新浪 raw 字段中解析逗号分隔的数据"""
+    if not raw_text or len(raw_text) < 10:
+        return []
+    try:
+        data_part = raw_text.split('"')[1] if '"' in raw_text else ""
+        if not data_part:
+            return []
+        return data_part.split(",")
+    except (IndexError, ValueError):
+        return []
+
+
+def safe_float(val, default=0.0):
+    """安全转换为浮点数"""
+    try:
+        if val is None or val == "" or val == "-":
+            return default
+        if isinstance(val, float) and math.isnan(val):
+            return default
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def safe_str(val):
+    """安全转换为字符串"""
+    if val is None:
+        return "数据暂缺"
+    return str(val)
+
+
+def round2(val):
+    """保留2位小数"""
+    return round(safe_float(val), 2)
+
+
+def find_latest_raw_file(data_dir):
+    """在 data/ 目录下找到最新的 raw_data_*.json 文件"""
+    pattern = os.path.join(data_dir, "raw_data_*.json")
+    files = glob.glob(pattern)
+    # 排除 raw_data_latest.json
+    files = [f for f in files if not f.endswith("raw_data_latest.json")]
+    if not files:
+        return None
+    # 按修改时间排序，取最新的
+    files.sort(key=os.path.getmtime, reverse=True)
+    return files[0]
+
+
+def load_raw_data(file_path):
+    """加载原始数据文件"""
+    print(f"[INFO] 加载数据文件: {file_path}")
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    print(f"[INFO] 数据加载成功，顶层字段: {list(data.keys())}")
+    return data
+
+
+def extract_news_titles(news_data):
+    """
+    从新闻数据中提取标题列表。
+    兼容多种格式:
+      1. fetch_data.py 旧格式: {"status": 200, "titles": [...], ...}
+      2. 新格式: {"status": 200, "preview": "<html>..."} (需要从HTML中提取)
+      3. 错误格式: {"status": 403, "preview": "..."}
+    """
+    if not isinstance(news_data, dict):
+        return "数据暂缺"
+
+    # 检查 HTTP 状态码
+    status = news_data.get("status", 0)
+    if status == 403:
+        return "FAILED: 403 Forbidden"
+
+    # 格式1: 直接有 titles 字段
+    if "titles" in news_data and isinstance(news_data["titles"], list):
+        return news_data["titles"][:10]
+
+    # 格式2: 有 preview 字段（HTML），需要提取标题
+    if "preview" in news_data:
+        import re
+        html = news_data["preview"]
+        titles = []
+
+        # 提取 <title> 标签
+        title_match = re.search(r'<title[^>]*>(.*?)</title>', html,
+                                re.IGNORECASE | re.DOTALL)
+        if title_match:
+            titles.append(title_match.group(1).strip())
+
+        # 提取 og:title
+        og_match = re.search(
+            r'<meta[^>]*property=["\']og:title["\'][^>]*content=["\'](.*?)["\']',
+            html, re.IGNORECASE)
+        if og_match:
+            t = og_match.group(1).strip()
+            if t and t not in titles:
+                titles.append(t)
+
+        # 提取 meta description
+        desc_match = re.search(
+            r'<meta[^>]*name=["\']description["\'][^>]*content=["\'](.*?)["\']',
+            html, re.IGNORECASE)
+        if desc_match:
+            t = desc_match.group(1).strip()
+            if t and len(t) > 10 and t not in titles:
+                titles.append(t)
+
+        # 提取 h1/h2/h3 标签
+        for pattern in [r'<h1[^>]*>(.*?)</h1>',
+                        r'<h2[^>]*>(.*?)</h2>',
+                        r'<h3[^>]*>(.*?)</h3>']:
+            matches = re.findall(pattern, html, re.IGNORECASE | re.DOTALL)
+            for m in matches:
+                clean = re.sub(r'<[^>]+>', '', m).strip()
+                if clean and len(clean) > 4 and clean not in titles:
+                    titles.append(clean)
+
+        # 提取含 title/headline 的 class
+        tag_pattern = (
+            r'<(?:div|span|a|li)[^>]*class=["\'][^"\']*(?:title|headline|news|'
+            r'heading)["\'][^>]*>(.*?)</(?:div|span|a|li)>'
+        )
+        matches = re.findall(tag_pattern, html, re.IGNORECASE | re.DOTALL)
+        for m in matches:
+            clean = re.sub(r'<[^>]+>', '', m).strip()
+            if clean and len(clean) > 4 and clean not in titles:
+                titles.append(clean)
+
+        if titles:
+            return titles[:10]
+
+    # 检查是否有 error
+    if "error" in news_data:
+        return f"FAILED: {news_data['error']}"
+
+    return "数据暂缺"
+
+
+# ---------------------------------------------------------------------------
+# 第一章: 大盘概览
+# ---------------------------------------------------------------------------
+
+def extract_chapter1(data):
+    """提取第一章需要的数据: 指数、美股、港股、外汇商品、新闻"""
+    chapter = {}
+
+    # --- 1.1 A股指数摘要 ---
+    index_daily = data.get("index_daily", {})
+    index_summary = []
+    index_code_map = {
+        "上证指数": "000001.SH",
+        "深证成指": "399001.SZ",
+        "创业板指": "399006.SZ",
+        "科创50": "000688.SH",
+        "沪深300": "000300.SH",
+        "中证500": "000905.SH",
+        "上证50": "000016.SH",
+    }
+    for name, code in index_code_map.items():
+        records = index_daily.get(name, [])
+        if records:
+            latest = records[0]  # 第一条即为最新交易日
+            index_summary.append({
+                "name": name,
+                "ts_code": code,
+                "close": safe_float(latest.get("close")),
+                "pct_chg": round2(latest.get("pct_chg")),
+                "vol": safe_float(latest.get("vol")),
+                "amount": safe_float(latest.get("amount")),
+                "high": safe_float(latest.get("high")),
+                "low": safe_float(latest.get("low")),
+                "pre_close": safe_float(latest.get("pre_close")),
+                "source": "tushare",
+            })
+        else:
+            index_summary.append({
+                "name": name,
+                "ts_code": code,
+                "close": "数据暂缺",
+                "pct_chg": "数据暂缺",
+                "vol": "数据暂缺",
+                "amount": "数据暂缺",
+                "high": "数据暂缺",
+                "low": "数据暂缺",
+                "pre_close": "数据暂缺",
+                "source": "tushare",
+            })
+    chapter["index_summary"] = index_summary
+
+    # --- 1.2 美股盘前期货 ---
+    us_premarket = data.get("us_premarket", {})
+    us_premarket_summary = {}
+    futures_map = {
+        "道琼斯期货": "道琼斯期货",
+        "纳斯达克期货": "纳斯达克期货",
+        "标普期货": "标普期货",
+    }
+    for display_name, key in futures_map.items():
+        item = us_premarket.get(key, {})
+        if isinstance(item, dict) and "error" not in item:
+            price = safe_float(item.get("price"))
+            pre_close = safe_float(item.get("pre_close"))
+            # fetch_data.py 的期货解析有bug: pre_close 为 None，change_pct 实际存的是 pre_close
+            # 从 raw 字段正确解析
+            if pre_close == 0.0 and "raw" in item:
+                parts = parse_sina_raw(item["raw"])
+                # 新浪期货格式: [0]=当前价, [1]=涨跌额(空), [2]=昨收, [3]=开盘, [4]=最高, [5]=最低
+                if len(parts) >= 3:
+                    pre_close = safe_float(parts[2])
+            # 始终从 price 和 pre_close 手动计算 change 和 change_pct
+            change = 0.0
+            change_pct = 0.0
+            if price != 0.0 and pre_close != 0.0:
+                change = round(price - pre_close, 4)
+                change_pct = round(change / pre_close * 100, 4)
+            us_premarket_summary[display_name] = {
+                "price": safe_str(price) if price != 0.0 else "数据暂缺",
+                "change": safe_str(change) if change != 0.0 else "数据暂缺",
+                "change_pct": safe_str(change_pct) if change_pct != 0.0 else "数据暂缺",
+                "pre_close": safe_str(pre_close) if pre_close != 0.0 else "数据暂缺",
+                "source": "sina_http",
+            }
+        else:
+            us_premarket_summary[display_name] = "数据暂缺"
+    chapter["us_premarket"] = us_premarket_summary
+
+    # --- 1.3 美股收盘指数 ---
+    us_close_summary = {}
+    close_map = {
+        "道琼斯": "道琼斯_收盘",
+        "纳斯达克": "纳斯达克_收盘",
+        "标普500": "标普500_收盘",
+    }
+    for display_name, key in close_map.items():
+        item = us_premarket.get(key, {})
+        if isinstance(item, dict) and "error" not in item:
+            price = safe_float(item.get("price"))
+            change = safe_float(item.get("change"))
+            change_pct = safe_float(item.get("change_pct"))
+            # 如果 change/change_pct 为 None 或 0，尝试从 raw 字段解析
+            if (change == 0.0 or change_pct == 0.0) and "raw" in item:
+                parts = parse_sina_raw(item["raw"])
+                # 格式: "名称,当前点位,涨跌额,涨跌幅%"
+                if len(parts) >= 4:
+                    if change == 0.0:
+                        change = safe_float(parts[2])
+                    if change_pct == 0.0:
+                        change_pct = safe_float(parts[3])
+            us_close_summary[display_name] = {
+                "price": safe_str(price) if price != 0.0 else "数据暂缺",
+                "change": safe_str(change) if change != 0.0 else "数据暂缺",
+                "change_pct": safe_str(change_pct) if change_pct != 0.0 else "数据暂缺",
+                "source": "sina_http",
+            }
+        else:
+            us_close_summary[display_name] = "数据暂缺"
+    chapter["us_close"] = us_close_summary
+
+    # --- 1.4 港股指数 ---
+    hk_index = data.get("hk_index", {})
+    hk_summary = {}
+    for hk_name in ["恒生指数", "恒生科技"]:
+        item = hk_index.get(hk_name, {})
+        if isinstance(item, dict) and "error" not in item:
+            price = safe_float(item.get("price"))
+            change = safe_float(item.get("change"))
+            change_pct = safe_float(item.get("change_pct"))
+            # 如果 change/change_pct 为 None 或 0，尝试从 raw 字段解析
+            if (change == 0.0 or change_pct == 0.0) and "raw" in item:
+                parts = parse_sina_raw(item["raw"])
+                # 格式: "名称,当前价,涨跌额,涨跌幅%"
+                if len(parts) >= 4:
+                    if change == 0.0:
+                        change = safe_float(parts[2])
+                    if change_pct == 0.0:
+                        change_pct = safe_float(parts[3])
+            hk_summary[hk_name] = {
+                "price": safe_str(price) if price != 0.0 else "数据暂缺",
+                "change": safe_str(change) if change != 0.0 else "数据暂缺",
+                "change_pct": safe_str(change_pct) if change_pct != 0.0 else "数据暂缺",
+                "source": "sina_http",
+            }
+        else:
+            hk_summary[hk_name] = "数据暂缺"
+    chapter["hk_index"] = hk_summary
+
+    # --- 1.5 外汇商品 ---
+    fx_commodity = data.get("fx_commodity", {})
+    fx_summary = {}
+
+    # 美元指数: DINIW 格式，fetch_data.py 已分开获取
+    usd_item = fx_commodity.get("美元指数", {})
+    if isinstance(usd_item, dict) and "price" in usd_item and "error" not in usd_item:
+        price = usd_item.get("price")
+        change = usd_item.get("change")
+        change_pct = usd_item.get("change_pct")
+        fx_summary["美元指数"] = {
+            "price": str(price) if price else "数据暂缺",
+            "change": str(change) if change else "数据暂缺",
+            "change_pct": str(change_pct) if change_pct else "数据暂缺",
+            "source": "sina_http",
+        }
+    else:
+        fx_summary["美元指数"] = "数据暂缺"
+
+    # 在岸人民币
+    cny_item = fx_commodity.get("在岸人民币", {})
+    if isinstance(cny_item, dict) and "price" in cny_item and "error" not in cny_item:
+        price = cny_item.get("price")
+        change = cny_item.get("change")
+        change_pct = cny_item.get("change_pct")
+        fx_summary["在岸人民币"] = {
+            "price": str(price) if price else "数据暂缺",
+            "change": str(change) if change else "数据暂缺",
+            "change_pct": str(change_pct) if change_pct else "数据暂缺",
+            "source": "sina_http",
+        }
+    else:
+        fx_summary["在岸人民币"] = "数据暂缺"
+
+    # 黄金
+    gold_item = fx_commodity.get("黄金", {})
+    if isinstance(gold_item, dict) and "error" not in gold_item:
+        price = gold_item.get("price")
+        change = gold_item.get("change")
+        change_pct = gold_item.get("change_pct")
+        fx_summary["黄金"] = {
+            "price": str(price) if price else "数据暂缺",
+            "change": str(change) if change else "数据暂缺",
+            "change_pct": str(change_pct) if change_pct else "数据暂缺",
+            "source": "sina_http",
+        }
+    else:
+        fx_summary["黄金"] = "数据暂缺"
+
+    # 原油
+    oil_item = fx_commodity.get("原油", {})
+    if isinstance(oil_item, dict) and "error" not in oil_item:
+        price = oil_item.get("price")
+        change = oil_item.get("change")
+        change_pct = oil_item.get("change_pct")
+        fx_summary["原油"] = {
+            "price": str(price) if price else "数据暂缺",
+            "change": str(change) if change else "数据暂缺",
+            "change_pct": str(change_pct) if change_pct else "数据暂缺",
+            "source": "sina_http",
+        }
+    else:
+        fx_summary["原油"] = "数据暂缺"
+
+    chapter["fx_commodity"] = fx_summary
+
+    # --- 1.6 新闻头条 ---
+    news_headlines = data.get("news_headlines", {})
+    news_summary = {}
+    for source_name in ["上海证券报", "证券时报", "人民日报"]:
+        source_data = news_headlines.get(source_name, {})
+        titles = extract_news_titles(source_data)
+        news_summary[source_name] = titles
+    chapter["news_headlines"] = news_summary
+
+    return {"chapter1": chapter}
+
+
+# ---------------------------------------------------------------------------
+# 第二章: 龙虎榜与资金动向
+# ---------------------------------------------------------------------------
+
+def extract_chapter2(data):
+    """提取第二章需要的数据: 机构买卖、北向资金、融资融券、龙虎榜个股"""
+    chapter = {}
+
+    # --- 2.1 机构净买入/卖出 TOP5 ---
+    top_inst = data.get("top_inst", [])
+    if top_inst:
+        # 按 ts_code + side 聚合机构净买卖
+        inst_by_code = defaultdict(lambda: {"buy": 0.0, "sell": 0.0, "net_buy": 0.0})
+        name_map = {}
+        reason_map = {}
+
+        for item in top_inst:
+            ts_code = item.get("ts_code", "")
+            name = item.get("exalter", "")
+            if ts_code and "name" not in inst_by_code[ts_code]:
+                # 尝试从 top_list 获取股票名称
+                inst_by_code[ts_code]["name"] = ""
+            net_buy = safe_float(item.get("net_buy", 0))
+            inst_by_code[ts_code]["net_buy"] += net_buy
+            inst_by_code[ts_code]["buy"] += safe_float(item.get("buy", 0))
+            inst_by_code[ts_code]["sell"] += safe_float(item.get("sell", 0))
+            if ts_code not in reason_map:
+                reason_map[ts_code] = item.get("reason", "")
+
+        # 从 top_list 获取股票名称映射
+        top_list = data.get("top_list", [])
+        for item in top_list:
+            ts_code = item.get("ts_code", "")
+            stock_name = item.get("name", "")
+            if ts_code and stock_name:
+                name_map[ts_code] = stock_name
+
+        # 排序: 净买入 TOP5
+        sorted_by_net = sorted(
+            inst_by_code.items(),
+            key=lambda x: x[1]["net_buy"],
+            reverse=True
+        )
+
+        top5_buy = []
+        top5_sell = []
+        for ts_code, agg in sorted_by_net:
+            entry = {
+                "ts_code": ts_code,
+                "name": name_map.get(ts_code, "数据暂缺"),
+                "net_buy": round(agg["net_buy"], 2),
+                "reason": reason_map.get(ts_code, ""),
+                "source": "tushare",
+            }
+            if len(top5_buy) < 5 and agg["net_buy"] > 0:
+                top5_buy.append(entry)
+            elif len(top5_sell) < 5 and agg["net_buy"] < 0:
+                top5_sell.append(entry)
+            if len(top5_buy) >= 5 and len(top5_sell) >= 5:
+                break
+
+        chapter["top_inst_aggregate"] = {
+            "机构净买入TOP5": top5_buy,
+            "机构净卖出TOP5": top5_sell,
+        }
+    else:
+        chapter["top_inst_aggregate"] = {
+            "机构净买入TOP5": "数据暂缺",
+            "机构净卖出TOP5": "数据暂缺",
+        }
+
+    # --- 2.2 沪深港通 ---
+    hsgt = data.get("hsgt", [])
+    if hsgt and len(hsgt) > 0:
+        record = hsgt[0]
+        chapter["north_money"] = {
+            "north_money": safe_str(record.get("north_money", "数据暂缺")),
+            "ggt_ss": safe_str(record.get("ggt_ss", "数据暂缺")),
+            "ggt_sz": safe_str(record.get("ggt_sz", "数据暂缺")),
+            "hgt": safe_str(record.get("hgt", "数据暂缺")),
+            "sgt": safe_str(record.get("sgt", "数据暂缺")),
+            "south_money": safe_str(record.get("south_money", "数据暂缺")),
+            "note": "单位：万元",
+            "source": "tushare",
+        }
+    else:
+        chapter["north_money"] = "数据暂缺"
+
+    # --- 2.3 融资融券 ---
+    margin = data.get("margin", [])
+    if margin and len(margin) > 0:
+        # 取前5条作为摘要
+        chapter["margin"] = margin[:5]
+        for item in chapter["margin"]:
+            item["source"] = "tushare"
+    else:
+        chapter["margin"] = "数据暂缺"
+
+    # --- 2.4 龙虎榜个股 TOP10 (按涨跌幅绝对值) ---
+    if top_list:
+        # 先去重（同一只股票可能因不同原因出现多次）
+        seen = {}
+        for item in top_list:
+            ts_code = item.get("ts_code", "")
+            if ts_code not in seen:
+                seen[ts_code] = item
+
+        # 按涨跌幅绝对值排序
+        deduped = list(seen.values())
+        deduped.sort(
+            key=lambda x: abs(safe_float(x.get("pct_change", 0))),
+            reverse=True
+        )
+
+        top10 = []
+        for item in deduped[:10]:
+            top10.append({
+                "ts_code": item.get("ts_code", ""),
+                "name": item.get("name", "数据暂缺"),
+                "close": safe_float(item.get("close")),
+                "pct_change": round2(item.get("pct_change")),
+                "reason": item.get("reason", ""),
+                "source": "tushare",
+            })
+        chapter["top_list_stocks"] = top10
+    else:
+        chapter["top_list_stocks"] = "数据暂缺"
+
+    return {"chapter2": chapter}
+
+
+# ---------------------------------------------------------------------------
+# 第三章: 资金流向分析
+# ---------------------------------------------------------------------------
+
+def extract_chapter3(data):
+    """提取第三章需要的数据: 主力资金流向汇总、大小单流向"""
+    chapter = {}
+
+    moneyflow = data.get("moneyflow", [])
+    if not moneyflow:
+        chapter["moneyflow_aggregate"] = "数据暂缺"
+        chapter["big_small_order_flow"] = "数据暂缺"
+        return {"chapter3": chapter}
+
+    # --- 3.1 资金流向汇总 ---
+    total_net_buy = 0.0
+    total_buy_elg = 0.0
+    total_sell_elg = 0.0
+    total_buy_lg = 0.0
+    total_sell_lg = 0.0
+    total_buy_md = 0.0
+    total_sell_md = 0.0
+    total_buy_sm = 0.0
+    total_sell_sm = 0.0
+
+    # 行业汇总: 用 ts_code 前缀推断市场/板块
+    # SH=上海主板, SZ=深圳主板, 300xxx=创业板, 688xxx=科创板
+    industry_flow = defaultdict(lambda: {"net_inflow": 0.0, "count": 0})
+
+    for item in moneyflow:
+        net_mf = safe_float(item.get("net_mf_amount", 0))
+        total_net_buy += net_mf
+
+        total_buy_elg += safe_float(item.get("buy_elg_amount", 0))
+        total_sell_elg += safe_float(item.get("sell_elg_amount", 0))
+        total_buy_lg += safe_float(item.get("buy_lg_amount", 0))
+        total_sell_lg += safe_float(item.get("sell_lg_amount", 0))
+        total_buy_md += safe_float(item.get("buy_md_amount", 0))
+        total_sell_md += safe_float(item.get("sell_md_amount", 0))
+        total_buy_sm += safe_float(item.get("buy_sm_amount", 0))
+        total_sell_sm += safe_float(item.get("sell_sm_amount", 0))
+
+        # 按市场分类
+        ts_code = item.get("ts_code", "")
+        if ts_code.endswith(".SH"):
+            code_num = ts_code.split(".")[0]
+            if code_num.startswith("688"):
+                market = "科创板"
+            elif code_num.startswith("000"):
+                market = "上证指数"  # 上证指数本身
+            else:
+                market = "沪市主板"
+        elif ts_code.endswith(".SZ"):
+            code_num = ts_code.split(".")[0]
+            if code_num.startswith("300"):
+                market = "创业板"
+            elif code_num.startswith("00"):
+                market = "深市主板"
+            else:
+                market = "深市其他"
+        else:
+            market = "其他"
+
+        industry_flow[market]["net_inflow"] += net_mf
+        industry_flow[market]["count"] += 1
+
+    # 行业净流入 TOP5 / 净流出 TOP5
+    sorted_industries = sorted(
+        industry_flow.items(),
+        key=lambda x: x[1]["net_inflow"],
+        reverse=True
+    )
+    top_inflow = [
+        {
+            "market": name,
+            "net_inflow": round(info["net_inflow"], 2),
+            "stock_count": info["count"],
+        }
+        for name, info in sorted_industries[:5]
+    ]
+    top_outflow = [
+        {
+            "market": name,
+            "net_inflow": round(info["net_inflow"], 2),
+            "stock_count": info["count"],
+        }
+        for name, info in sorted_industries[-5:]
+        if info["net_inflow"] < 0
+    ]
+    # 如果净流出不足5个，用 "数据暂缺" 补齐
+    while len(top_outflow) < 5:
+        top_outflow.append("数据暂缺")
+
+    chapter["moneyflow_aggregate"] = {
+        "total_net_buy_amount": round(total_net_buy, 2),
+        "total_net_buy_unit": "万元",
+        "top_net_inflow_industries": top_inflow,
+        "top_net_outflow_industries": top_outflow,
+        "note": "moneyflow数据为个股级别，行业汇总基于ts_code前缀推断(沪市主板/深市主板/创业板/科创板)",
+        "source": "tushare",
+    }
+
+    # --- 3.2 大小单流向 ---
+    chapter["big_small_order_flow"] = {
+        "超大单净流入": round(total_buy_elg - total_sell_elg, 2),
+        "大单净流入": round(total_buy_lg - total_sell_lg, 2),
+        "中单净流入": round(total_buy_md - total_sell_md, 2),
+        "小单净流入": round(total_buy_sm - total_sell_sm, 2),
+        "unit": "万元",
+        "note": "从moneyflow中buy_elg_amount/sell_elg_amount等字段汇总",
+        "source": "tushare",
+    }
+
+    return {"chapter3": chapter}
+
+
+# ---------------------------------------------------------------------------
+# 第四章: 涨跌停与市场情绪
+# ---------------------------------------------------------------------------
+
+def extract_chapter4(data):
+    """提取第四章需要的数据: 涨跌停统计、市场涨跌家数"""
+    chapter = {}
+
+    limit_list = data.get("limit_list", [])
+    daily_basic = data.get("daily_basic", [])
+
+    # --- 4.1 涨跌停统计 ---
+    limit_up_stocks = []
+    limit_down_stocks = []
+    limit_source = "tushare_limit_list"
+
+    if isinstance(limit_list, list) and len(limit_list) > 0:
+        # 正常涨跌停数据
+        for item in limit_list:
+            limit_up_stocks.append({
+                "ts_code": item.get("ts_code", ""),
+                "name": item.get("name", "数据暂缺"),
+                "close": safe_float(item.get("close")),
+                "pct_chg": round2(item.get("pct_chg")),
+                "industry": item.get("industry", "数据暂缺"),
+                "source": "tushare",
+            })
+        # 注意: limit_list 中涨跌停混在一起，需要根据 up/down 或 pct_chg 区分
+        # tushare limit_list 有 limit 字段: 'U' 或 'D'
+        limit_up_stocks = [
+            s for s in limit_up_stocks
+            if limit_list[next(
+                i for i, it in enumerate(limit_list)
+                if it.get("ts_code") == s["ts_code"]
+            )].get("limit") == "U"
+        ] if any(it.get("limit") for it in limit_list) else limit_up_stocks
+
+        limit_up_count = len(limit_up_stocks)
+        limit_down_count = len(limit_list) - limit_up_count
+
+    elif isinstance(limit_list, dict):
+        # 降级数据 (from daily_basic fallback)
+        limit_source = "DEGRADED: 从daily_basic推断(pct_chg>=9.8%)"
+        limit_up_count = limit_list.get("limit_up_count", 0)
+        limit_down_count = limit_list.get("limit_down_count", 0)
+
+        for item in limit_list.get("limit_up_sample", []):
+            limit_up_stocks.append({
+                "ts_code": item.get("ts_code", ""),
+                "name": item.get("name", "数据暂缺"),
+                "close": safe_float(item.get("close")),
+                "pct_chg": round2(item.get("pct_chg")),
+                "industry": "数据暂缺",
+                "source": "tushare",
+                "note": "DEGRADED: 从daily_basic推断",
+            })
+        for item in limit_list.get("limit_down_sample", []):
+            limit_down_stocks.append({
+                "ts_code": item.get("ts_code", ""),
+                "name": item.get("name", "数据暂缺"),
+                "close": safe_float(item.get("close")),
+                "pct_chg": round2(item.get("pct_chg")),
+                "industry": "数据暂缺",
+                "source": "tushare",
+                "note": "DEGRADED: 从daily_basic推断",
+            })
+    else:
+        # limit_list 为空，尝试从 daily_basic 推断
+        limit_source = "DEGRADED: 从daily_basic推断(pct_chg>=9.8%)"
+        limit_up_count = 0
+        limit_down_count = 0
+
+    chapter["limit_stats"] = {
+        "limit_up_count": limit_up_count,
+        "limit_down_count": limit_down_count,
+        "source": limit_source,
+    }
+    chapter["limit_up_stocks"] = limit_up_stocks[:30]  # 最多30只
+    chapter["limit_down_stocks"] = limit_down_stocks[:30]
+
+    # --- 4.2 每日指标统计 ---
+    if daily_basic:
+        total_stocks = len(daily_basic)
+        up_count = 0
+        down_count = 0
+        flat_count = 0
+        turnover_sum = 0.0
+        turnover_count = 0
+        limit_up_from_basic = 0
+
+        for item in daily_basic:
+            # daily_basic 没有 pct_chg 字段，需要从 close 和其他字段推断
+            # 但实际上 daily_basic 只有 close，没有 pct_chg
+            # 所以这里只能统计换手率等
+            tr = safe_float(item.get("turnover_rate"))
+            if tr > 0:
+                turnover_sum += tr
+                turnover_count += 1
+
+        avg_turnover = round(turnover_sum / turnover_count, 4) if turnover_count > 0 else 0
+
+        # 如果 limit_list 为空，从 daily_basic 推断涨停数
+        # 但 daily_basic 没有 pct_chg，所以无法推断
+        # 标注为数据暂缺
+        chapter["daily_basic_stats"] = {
+            "total_stocks": total_stocks,
+            "up_count": "数据暂缺",
+            "down_count": "数据暂缺",
+            "flat_count": "数据暂缺",
+            "avg_turnover_rate": avg_turnover,
+            "limit_up_count_from_basic": "数据暂缺",
+            "note": "daily_basic不含pct_chg字段，涨跌家数需从其他数据源获取",
+            "source": "tushare",
+        }
+    else:
+        chapter["daily_basic_stats"] = "数据暂缺"
+
+    return {"chapter4": chapter}
+
+
+# ---------------------------------------------------------------------------
+# 第六章: 数据质量报告
+# ---------------------------------------------------------------------------
+
+def extract_chapter6(data):
+    """提取第六章需要的数据: 数据质量报告"""
+    chapter = {}
+
+    # 从原始数据中提取 data_quality 和 data_quality_report
+    data_quality = data.get("data_quality", {})
+    data_quality_report = data.get("data_quality_report", {})
+
+    if data_quality:
+        chapter["data_quality_report"] = {
+            "data_sources": data_quality,
+            "quality_report": data_quality_report if data_quality_report else "原始数据中未包含 data_quality_report",
+            "note": "从 raw_data 中提取的数据质量信息",
+        }
+    else:
+        chapter["data_quality_report"] = "数据暂缺"
+
+    # 补充: 摘要生成时的数据可用性检查
+    availability = {}
+    availability["index_daily"] = bool(data.get("index_daily", {}))
+    availability["us_premarket"] = bool(data.get("us_premarket", {}))
+    availability["hk_index"] = bool(data.get("hk_index", {}))
+    availability["fx_commodity"] = bool(data.get("fx_commodity", {}))
+    availability["news_headlines"] = bool(data.get("news_headlines", {}))
+    availability["moneyflow"] = bool(data.get("moneyflow", []))
+    availability["top_list"] = bool(data.get("top_list", []))
+    availability["top_inst"] = bool(data.get("top_inst", []))
+    availability["margin"] = bool(data.get("margin", []))
+    availability["hsgt"] = bool(data.get("hsgt", []))
+    availability["limit_list"] = bool(data.get("limit_list", []))
+    availability["daily_basic"] = bool(data.get("daily_basic", []))
+    chapter["data_availability"] = availability
+
+    return {"chapter6": chapter}
+
+
+# ---------------------------------------------------------------------------
+# 主流程
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="从 raw_data_*.json 提取精炼摘要，生成 data_summary.json"
+    )
+    parser.add_argument(
+        "--file",
+        type=str,
+        default=None,
+        help="指定输入文件路径（默认读取 data/raw_data_latest.json）",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="指定输出文件路径（默认保存到 data/data_summary.json）",
+    )
+    args = parser.parse_args()
+
+    # 确定输入文件
+    if args.file:
+        input_file = args.file
+        if not os.path.isfile(input_file):
+            print(f"[ERROR] 指定的输入文件不存在: {input_file}")
+            sys.exit(1)
+    else:
+        # 优先读取 raw_data_latest.json
+        latest_file = os.path.join(DATA_DIR, "raw_data_latest.json")
+        if os.path.isfile(latest_file):
+            input_file = latest_file
+        else:
+            # 回退到最新的 raw_data_*.json
+            found = find_latest_raw_file(DATA_DIR)
+            if found:
+                input_file = found
+            else:
+                print("[ERROR] 未找到任何 raw_data_*.json 文件")
+                sys.exit(1)
+
+    # 加载数据
+    data = load_raw_data(input_file)
+
+    # 提取各章摘要
+    print("\n[INFO] 开始提取摘要数据...")
+    summary = {}
+
+    # 元信息
+    summary["meta"] = {
+        "source_file": os.path.basename(input_file),
+        "mode": data.get("mode", "数据暂缺"),
+        "fetch_time": data.get("fetch_time", "数据暂缺"),
+        "trade_date": data.get("trade_date", "数据暂缺"),
+        "summary_time": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    # 第一章: 大盘概览
+    print("  [1/4] 提取第一章: 大盘概览...")
+    summary.update(extract_chapter1(data))
+
+    # 第二章: 龙虎榜与资金动向
+    print("  [2/4] 提取第二章: 龙虎榜与资金动向...")
+    summary.update(extract_chapter2(data))
+
+    # 第三章: 资金流向分析
+    print("  [3/4] 提取第三章: 资金流向分析...")
+    summary.update(extract_chapter3(data))
+
+    # 第四章: 涨跌停与市场情绪
+    print("  [4/4] 提取第四章: 涨跌停与市场情绪...")
+    summary.update(extract_chapter4(data))
+
+    # 第六章: 数据质量报告
+    print("  [6/6] 提取第六章: 数据质量报告...")
+    summary.update(extract_chapter6(data))
+
+    # 第五章说明: 直接引用前面各章数据
+    summary["chapter5"] = {
+        "note": "第五章（行业板块分析）直接引用 chapter3 的资金流向行业汇总数据",
+        "data_reference": "chapter3.moneyflow_aggregate.top_net_inflow_industries / top_net_outflow_industries",
+    }
+
+    # 确定输出文件
+    if args.output:
+        output_file = args.output
+    else:
+        output_file = os.path.join(DATA_DIR, "data_summary.json")
+
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+    # 保存
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+
+    # 统计行数
+    with open(output_file, "r", encoding="utf-8") as f:
+        line_count = sum(1 for _ in f)
+
+    print(f"\n[INFO] 摘要数据已保存: {output_file}")
+    print(f"[INFO] 输出行数: {line_count}")
+    print(f"[INFO] 交易日期: {data.get('trade_date', 'N/A')}")
+
+    if line_count > 500:
+        print(f"[WARN] 输出超过500行 ({line_count}行)，建议检查数据量")
+    else:
+        print(f"[OK] 输出在500行以内")
+
+    return output_file
+
+
+if __name__ == "__main__":
+    main()
