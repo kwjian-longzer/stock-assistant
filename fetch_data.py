@@ -10,6 +10,8 @@
   - 港股指数 (新浪财经HTTP)
   - 外汇商品 (新浪财经HTTP)
   - 官方媒体头条 (网页抓取 + 降级)
+  - 财联社电报 (CLS API /api/cache)
+  - 财联社深度/VIP/投资日历/首页 (浏览器采集 cls_pages.json)
   - 资金流向、龙虎榜、龙虎榜机构明细 (Tushare)
   - 融资融券、沪深港通 (Tushare)
   - 涨跌停、每日指标 (Tushare)
@@ -889,6 +891,220 @@ def fetch_news_headlines(data_quality, trade_date):
 # ---------------------------------------------------------------------------
 
 
+def fetch_cls_telegraph(data_quality):
+    """获取财联社电报（24小时加红）
+    使用 /api/cache 接口，无需签名
+    """
+    result = {}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.cls.cn/',
+    }
+
+    try:
+        url = "https://www.cls.cn/api/cache?app=CailianpressWeb&name=telegraph&os=web&sv=8.7.9"
+        resp = requests.get(url, headers=headers, timeout=15)
+        data = resp.json()
+        roll_data = data.get('data', {}).get('roll_data', [])
+
+        if roll_data:
+            # 提取标题和内容
+            items = []
+            for item in roll_data:
+                title = item.get('title', '').strip()
+                content = item.get('content', '').strip()
+                ctime = item.get('ctime', 0)
+                is_red = item.get('color', '') == 'red' or item.get('level', '') == 'red'
+                stock_list = item.get('stock_list', [])
+
+                # 如果标题为空，用内容前50字作为标题
+                if not title and content:
+                    title = content[:50]
+
+                items.append({
+                    'title': title[:100],
+                    'content': content[:300],
+                    'time': ctime,
+                    'is_red': is_red,
+                    'stocks': [s.get('name', '') for s in stock_list if isinstance(s, dict)],
+                })
+
+            result['items'] = items
+            result['count'] = len(items)
+            record_quality(data_quality, "财联社电报", "OK", "cls_api", len(items))
+        else:
+            raise ValueError("电报数据为空")
+    except Exception as e:
+        print(f"[WARN] 财联社电报采集失败: {e}")
+        record_quality(data_quality, "财联社电报", "FAILED", "cls_api", 0, str(e))
+        result['error'] = str(e)
+
+    return result
+
+
+def fetch_cls_pages(data_quality):
+    """获取财联社深度头条、VIP文章、投资日历
+    这些页面是JS渲染，需要浏览器工具提取
+    自动化任务中AI会使用浏览器工具保存内容到 data/cls_pages.json
+    此函数读取该文件，如果不存在则标记为FAILED
+    """
+    result = {}
+    cls_pages_file = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "data", "cls_pages.json")
+
+    if os.path.exists(cls_pages_file):
+        try:
+            with open(cls_pages_file, 'r', encoding='utf-8') as f:
+                pages = json.load(f)
+
+            for page_name, content in pages.items():
+                if content and len(content) > 100:
+                    # 提取文章列表
+                    articles = _parse_cls_page_text(content, page_name)
+                    result[page_name] = {
+                        'raw_text': content[:8000],  # 保留前8000字符
+                        'articles': articles,
+                        'article_count': len(articles),
+                    }
+                    record_quality(data_quality, f"财联社-{page_name}", "OK",
+                                   "browser_scrape", len(articles))
+                else:
+                    result[page_name] = {'error': '内容为空或过短'}
+                    record_quality(data_quality, f"财联社-{page_name}", "FAILED",
+                                   "browser_scrape", 0, "内容为空")
+        except Exception as e:
+            print(f"[WARN] 财联社页面数据读取失败: {e}")
+            record_quality(data_quality, "财联社页面", "FAILED", "browser_scrape",
+                           0, str(e))
+            result['error'] = str(e)
+    else:
+        print("[INFO] 财联社浏览器采集数据不存在（data/cls_pages.json），跳过")
+        for page_name in ['深度头条', 'VIP文章', '投资日历', '首页']:
+            result[page_name] = {'error': '浏览器采集数据不存在'}
+            record_quality(data_quality, f"财联社-{page_name}", "FAILED",
+                           "browser_scrape", 0, "cls_pages.json不存在")
+
+    return result
+
+
+def _parse_cls_page_text(text, page_type):
+    """从财联社页面文本中解析文章列表"""
+    articles = []
+    lines = text.split('\n')
+
+    if page_type == '深度头条':
+        # 深度头条格式：标题 + ①②③简介 + 时间前阅X.XW
+        current = None
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 5:
+                continue
+            # 跳过导航栏文字
+            if any(skip in line for skip in ['关于我们', '网站声明', '联系方式', '用户反馈',
+                                               '网站地图', '帮助', '注册', '登录', '首页电报',
+                                               '话题盯盘', 'FM投研', '下载', '加载更多',
+                                               '热门话题', '已关注', '关注', '热门文章排行榜']):
+                continue
+
+            # 检测时间标记（X分钟前/X小时前）
+            time_match = any(t in line for t in ['分钟前', '小时前', '天前'])
+
+            if time_match and current:
+                current['time'] = line
+                articles.append(current)
+                current = None
+            elif line.startswith('①') or line.startswith('②') or line.startswith('③'):
+                if current:
+                    current['brief'] = (current.get('brief', '') + ' ' + line).strip()[:300]
+            elif not current:
+                current = {'title': line[:100], 'brief': ''}
+            elif not current.get('brief') and len(line) > 20:
+                current['brief'] = line[:300]
+
+        if current:
+            articles.append(current)
+
+    elif page_type == 'VIP文章':
+        # VIP格式：时间 + 【栏目】标题 + 简介 + 相关股票
+        current = None
+        for line in lines:
+            line = line.strip()
+            if not line or len(line) < 5:
+                continue
+            if any(skip in line for skip in ['关于我们', '网站声明', '注册', '登录',
+                                               '首页', '电报', '话题', '盯盘', 'FM',
+                                               '投研', '下载', '盘中宝', '风口研报',
+                                               '玩转ETF', '电报解读', '财联社早知道',
+                                               '数据研选', '九点特供', '加载更多', 'VIP试读']):
+                continue
+
+            # 检测时间格式 HH:MM
+            import re as _re
+            time_match = _re.match(r'^(\d{2}:\d{2})\[(.+?)\]', line)
+            if time_match:
+                if current:
+                    articles.append(current)
+                current = {
+                    'time': time_match.group(1),
+                    'title': time_match.group(2)[:100],
+                    'brief': '',
+                    'stocks': '',
+                    'column': '',
+                }
+            elif current:
+                if '相关股票' in line:
+                    current['stocks'] = line[:50]
+                elif '所属专栏' in line:
+                    current['column'] = line.replace('所属专栏：', '')[:30]
+                elif '人已读' in line:
+                    current['reads'] = line
+                elif len(line) > 20 and not current.get('brief'):
+                    current['brief'] = line[:300]
+
+        if current:
+            articles.append(current)
+
+    elif page_type == '投资日历':
+        # 投资日历格式：日期 + 事件描述
+        import re as _re
+        current_date = None
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            # 检测日期格式 YYYY-MM-DD
+            date_match = _re.match(r'^(\d{4}-\d{2}-\d{2})$', line)
+            if date_match:
+                current_date = date_match.group(1)
+                continue
+            # 检测事件
+            if current_date and len(line) > 10 and line not in ['星期一', '星期二', '星期三',
+                                                                   '星期四', '星期五', '星期六',
+                                                                   '星期天', '星期日', '事件',
+                                                                   '共', '条', '筛选', '全部',
+                                                                   '今天以后', '上月', '本月']:
+                if not any(skip in line for skip in ['板块名称', '涨跌幅', '资金流入',
+                                                       '股票名称', '涨跌价', '行业板块',
+                                                       '概念板块', '地域板块', '个股涨幅',
+                                                       '个股跌幅', '排序']):
+                    articles.append({
+                        'date': current_date,
+                        'event': line[:200],
+                    })
+
+    elif page_type == '首页':
+        # 首页：提取所有标题
+        for line in lines:
+            line = line.strip()
+            if len(line) > 10 and len(line) < 100:
+                if not any(skip in line for skip in ['关于我们', '网站声明', '注册', '登录',
+                                                       '首页', '电报', '话题', '盯盘',
+                                                       'FM', '投研', '下载', '©']):
+                    articles.append({'title': line})
+
+    return articles[:30]  # 最多30条
+
+
 def run_data_quality_check(data, data_quality):
     """
     采集完成后运行数据质量检查
@@ -1058,7 +1274,7 @@ def main():
     # 1. A股核心指数日线
     # ===================================================================
     if pro:
-        print("[1/11] 获取A股核心指数日线...")
+        print("[1/13] 获取A股核心指数日线...")
         index_codes = {
             "上证指数": "000001.SH",
             "深证成指": "399001.SZ",
@@ -1093,32 +1309,44 @@ def main():
     # ===================================================================
     # 2. 美股盘前期货 + 收盘指数
     # ===================================================================
-    print("[2/11] 获取美股盘前期货 + 收盘指数...")
+    print("[2/13] 获取美股盘前期货 + 收盘指数...")
     data["us_premarket"] = fetch_us_premarket(data_quality)
 
     # ===================================================================
     # 3. 港股指数
     # ===================================================================
-    print("[3/11] 获取港股指数...")
+    print("[3/13] 获取港股指数...")
     data["hk_index"] = fetch_hk_index(data_quality)
 
     # ===================================================================
     # 4. 外汇商品
     # ===================================================================
-    print("[4/11] 获取外汇商品...")
+    print("[4/13] 获取外汇商品...")
     data["fx_commodity"] = fetch_fx_commodity(data_quality)
 
     # ===================================================================
     # 5. 官方媒体头条
     # ===================================================================
-    print("[5/11] 获取官方媒体头条...")
+    print("[5/13] 获取官方媒体头条...")
     data["news_headlines"] = fetch_news_headlines(data_quality, trade_date)
 
     # ===================================================================
-    # 6. 资金流向
+    # 6. 财联社电报（24小时加红）
+    # ===================================================================
+    print("[6/13] 获取财联社电报...")
+    data["cls_telegraph"] = fetch_cls_telegraph(data_quality)
+
+    # ===================================================================
+    # 7. 财联社深度/VIP/投资日历/首页（浏览器采集）
+    # ===================================================================
+    print("[7/13] 获取财联社深度/VIP/投资日历/首页...")
+    data["cls_pages"] = fetch_cls_pages(data_quality)
+
+    # ===================================================================
+    # 8. 资金流向
     # ===================================================================
     if pro:
-        print("[6/11] 获取资金流向...")
+        print("[8/13] 获取资金流向...")
         records = fetch_moneyflow(pro, trade_date)
         data["moneyflow"] = records
         record_quality(data_quality, "资金流向",
@@ -1135,7 +1363,7 @@ def main():
     # 7. 龙虎榜
     # ===================================================================
     if pro:
-        print("[7/11] 获取龙虎榜...")
+        print("[9/13] 获取龙虎榜...")
         records = fetch_top_list(pro, trade_date)
         data["top_list"] = records
         record_quality(data_quality, "龙虎榜",
@@ -1144,7 +1372,7 @@ def main():
                        "" if records else "Tushare返回空数据")
         time.sleep(0.2)
 
-        print("[7.1/11] 获取龙虎榜机构明细...")
+        print("[9.1/13] 获取龙虎榜机构明细...")
         records = fetch_top_inst(pro, trade_date)
         data["top_inst"] = records
         record_quality(data_quality, "龙虎榜机构明细",
@@ -1164,7 +1392,7 @@ def main():
     # 8. 融资融券
     # ===================================================================
     if pro:
-        print("[8/11] 获取融资融券...")
+        print("[10/13] 获取融资融券...")
         records = fetch_margin(pro, trade_date)
         data["margin"] = records
         record_quality(data_quality, "融资融券",
@@ -1181,7 +1409,7 @@ def main():
     # 9. 沪深港通
     # ===================================================================
     if pro:
-        print("[9/11] 获取沪深港通...")
+        print("[11/13] 获取沪深港通...")
         records = fetch_hsgt(pro, trade_date)
         data["hsgt"] = records
         record_quality(data_quality, "沪深港通",
@@ -1198,7 +1426,7 @@ def main():
     # 10. 涨跌停（含降级机制）
     # ===================================================================
     if pro:
-        print("[10/11] 获取涨跌停...")
+        print("[12/13] 获取涨跌停...")
         records = fetch_limit_list(pro, trade_date)
         if records:
             data["limit_list"] = records
@@ -1229,7 +1457,7 @@ def main():
     # 11. 每日指标
     # ===================================================================
     if pro:
-        print("[11/11] 获取每日指标...")
+        print("[13/13] 获取每日指标...")
         records = fetch_daily_basic(pro, trade_date)
         data["daily_basic"] = records
         record_quality(data_quality, "每日指标",

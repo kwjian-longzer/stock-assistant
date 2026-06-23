@@ -35,26 +35,36 @@ stock-assistant/
 
 ---
 
-## 三、执行流程（五步，不可跳过）
+## 三、执行流程（六步，不可跳过）
 
 ```
-步骤1: python fetch_data.py [morning|noon|evening]
-       → 生成 data/raw_data_YYYYMMDD_mode.json + data/raw_data_latest.json
+步骤0:   git clone（拉取最新代码）
+         → git clone https://...github.com/kwjian-longzer/stock-assistant.git /workspace/stock-assistant
 
-步骤2: python extract_summary.py
-       → 读取 raw_data_latest.json，生成 data/data_summary.json
-       → 这是AI写报告时唯一允许使用的数据源
+步骤0.5: 财联社浏览器采集（JS渲染页面，Python无法直接抓取）
+         → 使用浏览器工具访问4个财联社页面，提取页面文本
+         → 保存到 data/cls_pages.json
+         → 电报由fetch_data.py通过API直接获取，无需浏览器
 
-步骤3: 读取 data/data_summary.json + analysis_prompt.md，撰写报告
-       → 保存到 reports/YYYY-MM-DD_报告类型.md
-       → 报告中每个数字必须来自 data_summary.json
+步骤1:   python fetch_data.py [morning|noon|evening]
+         → 生成 data/raw_data_YYYYMMDD_mode.json + data/raw_data_latest.json
+         → 包含财联社电报（API）+ 财联社页面（读取cls_pages.json）
 
-步骤4: python validate_report.py --report reports/YYYY-MM-DD_报告类型.md --summary data/data_summary.json
-       → 校验报告数据真实性
-       → 校验失败则必须修复报告后重新校验，直到通过
+步骤2:   python extract_summary.py
+         → 读取 raw_data_latest.json，生成 data/data_summary.json
+         → 包含第零章: 财联社信源扫描（chapter0_cls）
 
-步骤5: python push_feishu.py --file reports/YYYY-MM-DD_报告类型.md
-       → 校验通过后才允许推送
+步骤3:   读取 data/data_summary.json + analysis_prompt.md，撰写报告
+         → 保存到 reports/YYYY-MM-DD_报告类型.md
+         → 报告中每个数字必须来自 data_summary.json
+         → 必须包含第零章: 财联社信源扫描与信号提取
+
+步骤4:   python validate_report.py --report reports/YYYY-MM-DD_报告类型.md --summary data/data_summary.json
+         → 校验报告数据真实性
+         → 校验失败则必须修复报告后重新校验，直到通过
+
+步骤5:   python push_feishu.py --file reports/YYYY-MM-DD_报告类型.md
+         → 校验通过后才允许推送
 ```
 
 ---
@@ -76,8 +86,9 @@ stock-assistant/
 - 报告中提到的每一只股票的代码和名称必须来自 `data_summary.json`
 - 不允许凭空创造不存在的股票
 
-### 红线4：六章结构不可省略
-- 晨报/午报/晚报都必须包含完整的六章结构
+### 红线4：七章结构不可省略
+- 晨报/午报/晚报都必须包含完整的七章结构（第零章至第六章）
+- 第零章（财联社信源扫描）是报告核心，不可省略
 - 每章内容不得为空，如果该章数据全部缺失，也要写明"本章数据暂缺"并说明原因
 
 ### 红线5：校验不通过不推送
@@ -105,6 +116,11 @@ stock-assistant/
 | **证券时报** | **网页抓取** | **https://www.stcn.com/** | `<a href="...article...">` 标签文本 | 无替代，标记 FAILED |
 | **人民日报** | **网页抓取** | **http://paper.people.com.cn/rmrb/pc/layout/YYYYMM/DD/node_01.html** | `<a>` 标签文本，UTF-8编码 | 无替代，标记 FAILED |
 | **新闻联播** | **网页抓取** | **https://tv.cctv.cn/lm/xwlb/day/YYYYMMDD.shtml** | `<a title="标题">` 属性提取 | 无替代，标记 FAILED |
+| **财联社电报** | **CLS API** | **https://www.cls.cn/api/cache?app=CailianpressWeb&name=telegraph&os=web&sv=8.7.9** | JSON格式，roll_data数组，含title/content/color/stock_list | 无需签名，直接HTTP请求 |
+| **财联社深度头条** | **浏览器采集** | **https://www.cls.cn/depth?id=1000** | JS渲染，需浏览器提取document.body.innerText | 保存到data/cls_pages.json |
+| **财联社VIP文章** | **浏览器采集** | **https://www.cls.cn/vip** | JS渲染，需浏览器提取document.body.innerText | 保存到data/cls_pages.json |
+| **财联社投资日历** | **浏览器采集** | **https://www.cls.cn/investkalendar** | JS渲染，需浏览器提取document.body.innerText | 保存到data/cls_pages.json |
+| **财联社首页** | **浏览器采集** | **https://www.cls.cn/** | JS渲染，需浏览器提取document.body.innerText | 保存到data/cls_pages.json |
 | 资金流向 | Tushare moneyflow | - | - | 无替代，标记 FAILED |
 | 龙虎榜 | Tushare top_list + top_inst | - | - | 无替代，标记 FAILED |
 | **融资融券** | **Tushare margin** | - | - | **当天空数据自动回滚前5天** |
@@ -125,6 +141,34 @@ stock-assistant/
 - Tushare limit_list_d 需5000+积分，当前Token积分不足，使用东方财富涨停池替代
 - Tushare trade_cal 可能标记调休日为交易日但实际无数据，margin已实现自动回滚
 - 央视网新闻联播页面是JS动态加载，使用 day/YYYYMMDD.shtml 页面提取 title 属性
+
+### 财联社浏览器采集说明（步骤0.5）
+财联社深度头条、VIP文章、投资日历、首页均为JS渲染页面，Python requests无法获取内容。
+自动化任务中必须使用浏览器工具（browser_navigate + browser_evaluate）采集。
+
+**采集流程：**
+1. 依次访问4个URL，使用 browser_navigate 导航到页面
+2. 等待页面加载完成（等待2-3秒）
+3. 使用 browser_evaluate 执行 `document.body.innerText` 提取页面文本
+4. 将4个页面的文本保存为JSON格式到 `data/cls_pages.json`
+
+**cls_pages.json 格式：**
+```json
+{
+  "深度头条": "页面innerText文本...",
+  "VIP文章": "页面innerText文本...",
+  "投资日历": "页面innerText文本...",
+  "首页": "页面innerText文本..."
+}
+```
+
+**4个URL：**
+- 深度头条: `https://www.cls.cn/depth?id=1000`
+- VIP文章: `https://www.cls.cn/vip`
+- 投资日历: `https://www.cls.cn/investkalendar`
+- 首页: `https://www.cls.cn/`
+
+**注意：** 电报（telegraph）由 fetch_data.py 通过 /api/cache 接口直接获取，无需浏览器采集。
 
 ---
 
@@ -177,6 +221,16 @@ stock-assistant/
 ### 教训6：修复不端到端验证
 - **问题**：修改了脚本但忘了同步更新自动化任务的 message，导致修复无效
 - **修复**：每次修改后必须端到端验证完整流程，并同步更新所有自动化任务
+
+### 教训7：报告退化为数据罗列（2026-06-23）
+- **问题**：研报逐渐偏离初衷，变成简单罗列数据并粗暴摘出涨停板最猛的股票作为金股，缺乏推理链
+- **根因**：缺少信源驱动分析框架，没有将财联社信号与市场数据交叉验证
+- **修复**：新增第零章（财联社信源扫描），重写analysis_prompt.md强化推理链，金股必须满足信号+验证双重标准
+
+### 教训8：财联社信源遗忘（2026-06-23）
+- **问题**：财联社作为研报核心特色信源被完全遗忘，未集成到数据采集流程
+- **根因**：开发过程中专注于修复数据源问题，忽略了信源整合
+- **修复**：fetch_data.py新增财联社电报API采集+浏览器页面采集，extract_summary.py新增第零章财联社信源扫描
 
 ---
 

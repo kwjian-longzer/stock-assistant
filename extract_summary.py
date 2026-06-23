@@ -20,7 +20,7 @@ import json
 import math
 import os
 import sys
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 # ---------------------------------------------------------------------------
 # 工具函数
@@ -168,6 +168,134 @@ def extract_news_titles(news_data):
         return f"FAILED: {news_data['error']}"
 
     return "数据暂缺"
+
+
+# ---------------------------------------------------------------------------
+# 第零章: 财联社信源扫描（核心信源，推理链起点）
+# ---------------------------------------------------------------------------
+
+def extract_chapter0_cls(data):
+    """提取财联社数据摘要 - 作为研报的核心信源
+    
+    财联社五大数据源对应的分析维度:
+    - 电报(加红): 世界正在发生什么 → 即时信号
+    - 投资日历: 未来要发生什么 → 预期事件
+    - 深度头条: 编辑认为最重要的信息 → 市场焦点
+    - 首页: 市场在关注什么 → 热点方向
+    - VIP文章: 交易员都在看哪些热门标的 → 机构视角
+    """
+    chapter = {}
+
+    # --- 0.1 财联社电报（24小时加红）---
+    cls_telegraph = data.get("cls_telegraph", {})
+    if isinstance(cls_telegraph, dict) and "items" in cls_telegraph:
+        items = cls_telegraph["items"]
+        # 分离红色重要电报和普通电报
+        red_items = [it for it in items if it.get("is_red")]
+        all_stocks = []
+        for it in items:
+            stocks = it.get("stocks", [])
+            if isinstance(stocks, list):
+                all_stocks.extend(stocks)
+
+        # 统计股票提及频次
+        from collections import Counter
+        stock_counter = Counter(all_stocks)
+        hot_stocks = [{"name": s, "mentions": c} for s, c in stock_counter.most_common(20) if s]
+
+        chapter["cls_telegraph"] = {
+            "total_count": cls_telegraph.get("count", len(items)),
+            "red_count": len(red_items),
+            "red_items": [
+                {
+                    "title": it.get("title", ""),
+                    "content": it.get("content", ""),
+                    "stocks": it.get("stocks", []),
+                }
+                for it in red_items[:30]  # 最多30条红色电报
+            ],
+            "all_items_sample": [
+                {
+                    "title": it.get("title", ""),
+                    "content": it.get("content", "")[:100],
+                    "is_red": it.get("is_red", False),
+                    "stocks": it.get("stocks", []),
+                }
+                for it in items[:50]  # 前50条作为样本
+            ],
+            "hot_stocks": hot_stocks,
+            "source": "cls_api",
+        }
+    else:
+        chapter["cls_telegraph"] = "数据暂缺"
+
+    # --- 0.2 财联社深度头条 ---
+    cls_pages = data.get("cls_pages", {})
+    if isinstance(cls_pages, dict):
+        # 深度头条
+        depth = cls_pages.get("深度头条", {})
+        if isinstance(depth, dict) and "articles" in depth:
+            chapter["cls_depth"] = {
+                "articles": depth["articles"][:20],
+                "article_count": depth.get("article_count", 0),
+                "source": "browser_scrape",
+            }
+        else:
+            chapter["cls_depth"] = "数据暂缺"
+
+        # VIP文章
+        vip = cls_pages.get("VIP文章", {})
+        if isinstance(vip, dict) and "articles" in vip:
+            # 提取VIP文章中提到的股票
+            vip_stocks = []
+            for art in vip["articles"]:
+                stocks_str = art.get("stocks", "")
+                if stocks_str:
+                    # 按逗号或空格分割
+                    for s in stocks_str.replace("相关股票：", "").replace("相关股票:", "").split("，"):
+                        s = s.strip()
+                        if s and len(s) < 10:
+                            vip_stocks.append(s)
+            vip_stock_counter = Counter(vip_stocks)
+            vip_hot_stocks = [{"name": s, "mentions": c} for s, c in vip_stock_counter.most_common(15) if s]
+
+            chapter["cls_vip"] = {
+                "articles": vip["articles"][:20],
+                "article_count": vip.get("article_count", 0),
+                "hot_stocks": vip_hot_stocks,
+                "source": "browser_scrape",
+            }
+        else:
+            chapter["cls_vip"] = "数据暂缺"
+
+        # 投资日历
+        calendar = cls_pages.get("投资日历", {})
+        if isinstance(calendar, dict) and "articles" in calendar:
+            chapter["cls_calendar"] = {
+                "events": calendar["articles"][:30],
+                "event_count": calendar.get("article_count", 0),
+                "source": "browser_scrape",
+            }
+        else:
+            chapter["cls_calendar"] = "数据暂缺"
+
+        # 首页
+        homepage = cls_pages.get("首页", {})
+        if isinstance(homepage, dict) and "articles" in homepage:
+            chapter["cls_homepage"] = {
+                "titles": [a.get("title", "") for a in homepage["articles"][:20]],
+                "article_count": homepage.get("article_count", 0),
+                "source": "browser_scrape",
+            }
+        else:
+            chapter["cls_homepage"] = "数据暂缺"
+    else:
+        chapter["cls_depth"] = "数据暂缺"
+        chapter["cls_vip"] = "数据暂缺"
+        chapter["cls_calendar"] = "数据暂缺"
+        chapter["cls_homepage"] = "数据暂缺"
+
+    return {"chapter0_cls": chapter}
 
 
 # ---------------------------------------------------------------------------
@@ -791,6 +919,8 @@ def extract_chapter6(data):
     availability["hk_index"] = bool(data.get("hk_index", {}))
     availability["fx_commodity"] = bool(data.get("fx_commodity", {}))
     availability["news_headlines"] = bool(data.get("news_headlines", {}))
+    availability["cls_telegraph"] = bool(data.get("cls_telegraph", {}).get("items"))
+    availability["cls_pages"] = bool(data.get("cls_pages"))
     availability["moneyflow"] = bool(data.get("moneyflow", []))
     availability["top_list"] = bool(data.get("top_list", []))
     availability["top_inst"] = bool(data.get("top_inst", []))
@@ -861,24 +991,28 @@ def main():
         "summary_time": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
+    # 第零章: 财联社信源扫描（核心信源，推理链起点）
+    print("  [0/5] 提取第零章: 财联社信源扫描...")
+    summary.update(extract_chapter0_cls(data))
+
     # 第一章: 大盘概览
-    print("  [1/4] 提取第一章: 大盘概览...")
+    print("  [1/5] 提取第一章: 大盘概览...")
     summary.update(extract_chapter1(data))
 
     # 第二章: 龙虎榜与资金动向
-    print("  [2/4] 提取第二章: 龙虎榜与资金动向...")
+    print("  [2/5] 提取第二章: 龙虎榜与资金动向...")
     summary.update(extract_chapter2(data))
 
     # 第三章: 资金流向分析
-    print("  [3/4] 提取第三章: 资金流向分析...")
+    print("  [3/5] 提取第三章: 资金流向分析...")
     summary.update(extract_chapter3(data))
 
     # 第四章: 涨跌停与市场情绪
-    print("  [4/4] 提取第四章: 涨跌停与市场情绪...")
+    print("  [4/5] 提取第四章: 涨跌停与市场情绪...")
     summary.update(extract_chapter4(data))
 
     # 第六章: 数据质量报告
-    print("  [6/6] 提取第六章: 数据质量报告...")
+    print("  [5/5] 提取第六章: 数据质量报告...")
     summary.update(extract_chapter6(data))
 
     # 第五章说明: 直接引用前面各章数据
