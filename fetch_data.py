@@ -1032,15 +1032,15 @@ def _parse_cls_page_text(text, page_type):
             if not line or len(line) < 5:
                 continue
             if any(skip in line for skip in ['关于我们', '网站声明', '注册', '登录',
-                                               '首页', '电报', '话题', '盯盘', 'FM',
-                                               '投研', '下载', '盘中宝', '风口研报',
-                                               '玩转ETF', '电报解读', '财联社早知道',
-                                               '数据研选', '九点特供', '加载更多', 'VIP试读']):
+                                               '首页电报', '话题盯盘', 'FM投研',
+                                               '下载', '加载更多', 'VIP试读',
+                                               '热门文章排行榜', '最新文章',
+                                               '热门话题推荐']):
                 continue
 
-            # 检测时间格式 HH:MM
+            # 检测时间格式 HH:MM + 【栏目】或[栏目]
             import re as _re
-            time_match = _re.match(r'^(\d{2}:\d{2})\[(.+?)\]', line)
+            time_match = _re.match(r'^(\d{2}:\d{2})[【\[](.+?)[】\]]', line)
             if time_match:
                 if current:
                     articles.append(current)
