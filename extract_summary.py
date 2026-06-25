@@ -238,7 +238,7 @@ def extract_chapter0_cls(data):
             chapter["cls_depth"] = {
                 "articles": depth["articles"][:20],
                 "article_count": depth.get("article_count", 0),
-                "source": "browser_scrape",
+                "source": depth.get("source", "browser_scrape"),
             }
         else:
             chapter["cls_depth"] = "数据暂缺"
@@ -246,36 +246,44 @@ def extract_chapter0_cls(data):
         # VIP文章
         vip = cls_pages.get("VIP文章", {})
         if isinstance(vip, dict) and "articles" in vip:
-            # 提取VIP文章中提到的股票
+            # 提取VIP文章中提到的股票（兼容API的related_stock和浏览器的stocks）
             vip_stocks = []
             for art in vip["articles"]:
-                stocks_str = art.get("stocks", "")
+                # API格式: related_stock 字段
+                stocks_str = art.get("related_stock", "") or art.get("stocks", "")
                 if stocks_str:
-                    # 按逗号或空格分割
-                    for s in stocks_str.replace("相关股票：", "").replace("相关股票:", "").split("，"):
+                    # 按逗号或空格分割（兼容中英文逗号）
+                    for s in stocks_str.replace("相关股票：", "").replace("相关股票:", "").replace(",", "，").split("，"):
                         s = s.strip()
                         if s and len(s) < 10:
                             vip_stocks.append(s)
             vip_stock_counter = Counter(vip_stocks)
             vip_hot_stocks = [{"name": s, "mentions": c} for s, c in vip_stock_counter.most_common(15) if s]
+            # 如果API已提供hot_stocks，优先使用
+            if vip.get("hot_stocks"):
+                vip_hot_stocks = vip["hot_stocks"][:15]
 
             chapter["cls_vip"] = {
                 "articles": vip["articles"][:20],
                 "article_count": vip.get("article_count", 0),
                 "hot_stocks": vip_hot_stocks,
-                "source": "browser_scrape",
+                "source": vip.get("source", "browser_scrape"),
             }
         else:
             chapter["cls_vip"] = "数据暂缺"
 
-        # 投资日历
+        # 投资日历（兼容API的events键和浏览器的articles键）
         calendar = cls_pages.get("投资日历", {})
-        if isinstance(calendar, dict) and "articles" in calendar:
-            chapter["cls_calendar"] = {
-                "events": calendar["articles"][:30],
-                "event_count": calendar.get("article_count", 0),
-                "source": "browser_scrape",
-            }
+        if isinstance(calendar, dict):
+            cal_events = calendar.get("events", calendar.get("articles", []))
+            if cal_events:
+                chapter["cls_calendar"] = {
+                    "events": cal_events[:30],
+                    "event_count": calendar.get("event_count", calendar.get("article_count", 0)),
+                    "source": calendar.get("source", "browser_scrape"),
+                }
+            else:
+                chapter["cls_calendar"] = "数据暂缺"
         else:
             chapter["cls_calendar"] = "数据暂缺"
 
@@ -285,7 +293,7 @@ def extract_chapter0_cls(data):
             chapter["cls_homepage"] = {
                 "titles": [a.get("title", "") for a in homepage["articles"][:20]],
                 "article_count": homepage.get("article_count", 0),
-                "source": "browser_scrape",
+                "source": homepage.get("source", "browser_scrape"),
             }
         else:
             chapter["cls_homepage"] = "数据暂缺"
