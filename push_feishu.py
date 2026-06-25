@@ -551,6 +551,86 @@ def generate_qsq_md_report(qsq_json_path, report_date_str):
 
 
 # ---------------------------------------------------------------------------
+# VIP信息表MD文件生成（v2.0）
+# ---------------------------------------------------------------------------
+
+def generate_vip_md_from_summary(data_dir, report_date_str):
+    """从 data_summary.json 的 chapter_vip 生成VIP信息表MD文件
+
+    Args:
+        data_dir: data 目录路径
+        report_date_str: 报告日期，如 "2026-06-25"
+
+    Returns:
+        str: 生成的MD文件路径，无数据返回 None
+    """
+    summary_path = os.path.join(data_dir, "data_summary.json")
+    if not os.path.exists(summary_path):
+        return None
+
+    try:
+        with open(summary_path, 'r', encoding='utf-8') as f:
+            summary = json.load(f)
+    except Exception as e:
+        print(f"[WARN] 读取data_summary.json失败: {e}")
+        return None
+
+    chapter_vip = summary.get("chapter_vip", {})
+    if not isinstance(chapter_vip, dict) or not chapter_vip.get("vip_stocks"):
+        print("[SKIP] chapter_vip 无数据，跳过VIP信息表MD生成")
+        return None
+
+    # 用 vip_extractor 的 MD 生成函数
+    try:
+        from vip_extractor import generate_vip_md_report as _gen_vip_md
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(summary_path)))
+        md_path = _gen_vip_md(chapter_vip, report_date_str)
+        return md_path
+    except ImportError:
+        # fallback: 直接生成简单MD
+        return _generate_vip_md_fallback(chapter_vip, report_date_str)
+    except Exception as e:
+        print(f"[WARN] VIP信息表MD生成失败: {e}")
+        return None
+
+
+def _generate_vip_md_fallback(vip_table, report_date_str):
+    """VIP信息表MD生成（fallback，不依赖vip_extractor）"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    reports_dir = os.path.join(script_dir, "reports")
+    os.makedirs(reports_dir, exist_ok=True)
+
+    lines = []
+    lines.append(f"# VIP研报信息表（{report_date_str}）")
+    lines.append("")
+    lines.append(f"> 研报类文章: {vip_table.get('total_articles', 0)} 篇 | "
+                 f"提取股票: {vip_table.get('total_extracted', 0)} 只")
+    lines.append("")
+
+    stocks = vip_table.get("vip_stocks", [])
+    if stocks:
+        lines.append("| 序号 | 代码 | 名称 | 板块 | 催化关键词 | 来源研报 |")
+        lines.append("|------|------|------|------|-----------|---------|")
+        for i, s in enumerate(stocks, 1):
+            keywords = ", ".join(s.get("catalyst_keywords", [])[:5])
+            lines.append(
+                f"| {i} | {s.get('stock_code','')} | {s.get('stock_name','')} | "
+                f"{s.get('sector','')} | {keywords} | {s.get('source_article','')[:40]} |"
+            )
+        lines.append("")
+
+    lines.append("---")
+    lines.append(f"*生成时间: {report_date_str}*")
+
+    md_path = os.path.join(reports_dir, f"{report_date_str}_VIP信息表.md")
+    with open(md_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+
+    print(f"[OK] VIP信息表MD文件已生成(fallback): {md_path}")
+    return md_path
+
+
+# ---------------------------------------------------------------------------
 # Git 自动提交与推送（v2.0: 报告和数据存入仓库）
 # ---------------------------------------------------------------------------
 
@@ -619,6 +699,11 @@ def git_commit_and_push(report_path):
     if os.path.exists(qsq_md):
         files_to_add.append(qsq_md)
 
+    # 2.1 v2.0: VIP信息表MD文件（如果有）
+    vip_md = os.path.join(reports_dir, f"{date_str}_VIP信息表.md")
+    if os.path.exists(vip_md):
+        files_to_add.append(vip_md)
+
     # 3. 数据摘要文件
     data_summary_path = os.path.join(script_dir, "data", "data_summary.json")
     if os.path.exists(data_summary_path):
@@ -680,7 +765,7 @@ def push_to_feishu(file_path):
     """推送报告到飞书
 
     流程：
-    1. 通过 Open API 上传并发送文件（报告MD + 钱三强选股MD）
+    1. 通过 Open API 上传并发送文件（报告MD + 钱三强选股MD + VIP信息表MD）
     2. 通过 Webhook 发送重要提醒+金股摘要（不发送全文）
 
     Args:
@@ -709,11 +794,15 @@ def push_to_feishu(file_path):
 
     qsq_md_path = generate_qsq_md_report(qsq_json_path, date_str)
 
+    # --- v2.0: 准备VIP信息表MD文件 ---
+    vip_md_path = generate_vip_md_from_summary(data_dir, date_str)
+
     # --- 步骤1: 通过 Open API 发送文件 ---
     print("\n[步骤1] 通过Open API发送文件...")
     token = get_tenant_access_token()
     file_sent = False
     qsq_sent = False
+    vip_sent = False
 
     if token:
         print(f"[OK] 获取 tenant_access_token 成功")
@@ -733,6 +822,15 @@ def push_to_feishu(file_path):
                     qsq_sent = send_file_message(token, chat_id, qsq_file_key)
             else:
                 print(f"  [SKIP] 钱三强选股结果文件不存在，跳过")
+
+            # v2.0: 发送VIP信息表文件
+            if vip_md_path and os.path.exists(vip_md_path):
+                print(f"\n  [1.2] 发送VIP信息表文件...")
+                vip_file_key = upload_file(token, vip_md_path)
+                if vip_file_key:
+                    vip_sent = send_file_message(token, chat_id, vip_file_key)
+            else:
+                print(f"  [SKIP] VIP信息表文件不存在，跳过")
     else:
         print("[WARN] 无法获取 tenant_access_token，跳过文件发送")
         print("       可能原因：")
@@ -749,10 +847,15 @@ def push_to_feishu(file_path):
 
     # --- 汇总 ---
     print(f"\n{'='*60}")
-    if file_sent and qsq_sent:
-        print(f"  飞书: 报告+选股文件发送成功 + 摘要推送{'成功' if webhook_sent else '跳过'}")
-    elif file_sent:
-        print(f"  飞书: 报告文件发送成功(选股文件{'成功' if qsq_sent else '失败'}) + 摘要推送{'成功' if webhook_sent else '跳过'}")
+    files_sent = []
+    if file_sent:
+        files_sent.append("报告")
+    if qsq_sent:
+        files_sent.append("选股")
+    if vip_sent:
+        files_sent.append("VIP信息表")
+    if files_sent:
+        print(f"  飞书: {'+'.join(files_sent)}文件发送成功 + 摘要推送{'成功' if webhook_sent else '跳过'}")
     elif webhook_sent:
         print(f"  飞书: 文件发送失败，但摘要推送已发送")
     else:

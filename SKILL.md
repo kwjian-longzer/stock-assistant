@@ -77,8 +77,8 @@ stock-assistant/
          → 校验通过后才允许推送
          → 推送方式：MD文件（Open API）+ 重要提醒+金股摘要（Webhook）
          → 不发送全文，文字内容仅含重要提醒和金股推荐
-         → 自动生成钱三强选股结果MD文件，与报告MD一起发送
-         → **推送后自动 git commit + push 报告MD、数据摘要、钱三强选股结果到GitHub**
+         → 自动生成钱三强选股结果MD文件 + VIP信息表MD文件，与报告MD一起发送
+         → **推送后自动 git commit + push 报告MD、数据摘要、钱三强选股结果、电报归档、VIP信息表到GitHub**
 
 步骤6:   git add -A && git commit -m "..." && git push origin main
          → **仅用于代码文件修改的提交**（报告和数据已在步骤5自动提交）

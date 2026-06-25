@@ -1799,6 +1799,23 @@ def main():
     data["cls_pages"] = fetch_cls_pages(data_quality)
 
     # ===================================================================
+    # 7.5 VIP信息结构化提取（v2.0）
+    # ===================================================================
+    print("[7.5/13] VIP信息结构化提取...")
+    try:
+        from vip_extractor import extract_vip_info
+        cls_pages = data.get("cls_pages", {})
+        vip_data_section = cls_pages.get("VIP文章", {}) if isinstance(cls_pages, dict) else {}
+        vip_articles = vip_data_section.get("articles", []) if isinstance(vip_data_section, dict) else []
+        if vip_articles:
+            vip_info = extract_vip_info(vip_articles, pro=pro)
+            data["vip_info"] = vip_info
+        else:
+            print("  [SKIP] 无VIP文章，跳过VIP信息提取")
+    except Exception as e:
+        print(f"[WARN] VIP信息提取失败: {e}")
+
+    # ===================================================================
     # 8. 资金流向
     # ===================================================================
     if pro:

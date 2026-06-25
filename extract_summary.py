@@ -1222,6 +1222,68 @@ def extract_chapter_qsq(data):
 
 
 # ---------------------------------------------------------------------------
+# VIP信息表（v2.0: 研报催化概念结构化提取）
+# ---------------------------------------------------------------------------
+
+def extract_chapter_vip(data):
+    """提取VIP信息表
+
+    v2.0: 从 fetch_data.py 的VIP提取结果中读取结构化信息表。
+    如果raw_data中已包含vip_info（fetch_data.py调用vip_extractor生成），
+    直接使用；否则尝试从VIP文章中现场提取。
+
+    Args:
+        data: raw_data 字典
+
+    Returns:
+        dict: {"chapter_vip": vip_info_table}
+    """
+    # 1. 检查 raw_data 中是否已有 vip_info
+    vip_info = data.get("vip_info", None)
+
+    if vip_info and isinstance(vip_info, dict) and vip_info.get("vip_stocks"):
+        print(f"  [VIP] 从raw_data读取VIP信息表: {vip_info.get('total_extracted', 0)} 只股票")
+        return {"chapter_vip": vip_info}
+
+    # 2. 如果没有预提取的VIP信息表，从cls_pages的VIP文章中现场提取
+    cls_pages = data.get("cls_pages", {})
+    if isinstance(cls_pages, dict):
+        vip_data = cls_pages.get("VIP文章", {})
+        if isinstance(vip_data, dict) and vip_data.get("articles"):
+            vip_articles = vip_data["articles"]
+            print(f"  [VIP] 从VIP文章现场提取: {len(vip_articles)} 篇文章")
+            try:
+                from vip_extractor import extract_vip_info
+                # 尝试获取Tushare pro实例
+                pro = None
+                try:
+                    import tushare as ts
+                    ts.set_token("8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365")
+                    pro = ts.pro_api()
+                except Exception:
+                    pass
+
+                vip_table = extract_vip_info(vip_articles, pro=pro)
+                if vip_table.get("vip_stocks"):
+                    return {"chapter_vip": vip_table}
+                else:
+                    return {"chapter_vip": {
+                        "vip_stocks": [],
+                        "total_articles": vip_table.get("total_articles", 0),
+                        "total_extracted": 0,
+                        "catalyst_themes": vip_table.get("catalyst_themes", []),
+                        "note": "VIP文章已采集但未匹配到具体股票，催化主题供AI分析参考",
+                    }}
+            except Exception as e:
+                print(f"  [WARN] VIP信息提取失败: {e}")
+                return {"chapter_vip": "数据暂缺"}
+        else:
+            return {"chapter_vip": "数据暂缺"}
+    else:
+        return {"chapter_vip": "数据暂缺"}
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 
@@ -1307,10 +1369,14 @@ def main():
     print("  [5.5/7] 提取钱三强选股结果...")
     summary.update(extract_chapter_qsq(data))
 
+    # VIP信息表（v2.0: 从fetch_data.py的VIP提取结果中读取）
+    print("  [5.6/7] 提取VIP信息表...")
+    summary.update(extract_chapter_vip(data))
+
     # 第五章说明: 直接引用前面各章数据
     summary["chapter5"] = {
-        "note": "第五章（次日策略预判与金股）引用 chapter3 资金流向 + chapter_qsq 钱三强选股共振分析",
-        "data_reference": "chapter3.moneyflow_aggregate + chapter_qsq.selected_stocks + chapter_qsq.two_of_three_stocks",
+        "note": "第五章（次日策略预判与金股）引用 chapter3 资金流向 + chapter_qsq 钱三强选股共振分析 + chapter_vip VIP信息表",
+        "data_reference": "chapter3.moneyflow_aggregate + chapter_qsq.selected_stocks + chapter_qsq.two_of_three_stocks + chapter_vip.vip_stocks",
     }
 
     # 确定输出文件
