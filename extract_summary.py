@@ -1376,11 +1376,91 @@ def extract_weekly_summary(data):
     summary["latest_qsq"] = latest_qsq
     print(f"  [周报] 钱三强选股: {latest_qsq.get('selected_stocks_count', 0)} 只三强合一股票")
 
-    # 5. 周报分析指引
+    # 5. 周末实时数据（v2.0: 周末消息面+外围市场）
+    weekend_realtime = data.get("weekend_realtime", {})
+    weekend_summary = {}
+
+    # 5.1 周末财联社电报
+    wk_cls_telegraph = weekend_realtime.get("cls_telegraph", {})
+    if isinstance(wk_cls_telegraph, dict) and wk_cls_telegraph.get("items"):
+        wk_items = wk_cls_telegraph["items"]
+        wk_red = [it for it in wk_items if it.get("is_red")]
+        weekend_summary["cls_telegraph"] = {
+            "count": wk_cls_telegraph.get("count", len(wk_items)),
+            "red_count": len(wk_red),
+            "red_items": [
+                {"title": it.get("title", ""), "content": it.get("content", "")[:150],
+                 "stocks": it.get("stocks", [])}
+                for it in wk_red[:20]
+            ],
+            "archive": wk_cls_telegraph.get("archive", {}),
+        }
+        print(f"  [周报] 周末电报: {len(wk_items)} 条, 红色 {len(wk_red)} 条")
+    else:
+        weekend_summary["cls_telegraph"] = "数据暂缺"
+
+    # 5.2 周末财联社页面
+    wk_cls_pages = weekend_realtime.get("cls_pages", {})
+    if isinstance(wk_cls_pages, dict) and wk_cls_pages:
+        weekend_summary["cls_pages"] = {
+            "depth_articles": len(wk_cls_pages.get("深度头条", {}).get("articles", [])) if isinstance(wk_cls_pages.get("深度头条"), dict) else 0,
+            "vip_articles": len(wk_cls_pages.get("VIP文章", {}).get("articles", [])) if isinstance(wk_cls_pages.get("VIP文章"), dict) else 0,
+            "calendar_events": len(wk_cls_pages.get("投资日历", {}).get("events", [])) if isinstance(wk_cls_pages.get("投资日历"), dict) else 0,
+        }
+        # VIP信息表
+        wk_vip = weekend_realtime.get("vip_info", {})
+        if isinstance(wk_vip, dict) and wk_vip.get("vip_stocks"):
+            weekend_summary["vip_info"] = {
+                "total_extracted": wk_vip.get("total_extracted", 0),
+                "catalyst_themes": wk_vip.get("catalyst_themes", []),
+                "vip_stocks_count": len(wk_vip.get("vip_stocks", [])),
+            }
+        print(f"  [周报] 周末CLS页面采集完成")
+    else:
+        weekend_summary["cls_pages"] = "数据暂缺"
+
+    # 5.3 周末美股数据
+    wk_us = weekend_realtime.get("us_premarket", {})
+    if isinstance(wk_us, dict) and wk_us:
+        weekend_summary["us_market"] = {
+            "us_close": wk_us.get("us_close", {}),
+            "us_premarket": wk_us.get("us_premarket", {}),
+        }
+        print(f"  [周报] 周末美股数据采集完成")
+    else:
+        weekend_summary["us_market"] = "数据暂缺"
+
+    # 5.4 周末港股数据
+    wk_hk = weekend_realtime.get("hk_index", {})
+    if isinstance(wk_hk, dict) and wk_hk:
+        weekend_summary["hk_market"] = wk_hk
+        print(f"  [周报] 周末港股数据采集完成")
+    else:
+        weekend_summary["hk_market"] = "数据暂缺"
+
+    # 5.5 周末外汇商品
+    wk_fx = weekend_realtime.get("fx_commodity", {})
+    if isinstance(wk_fx, dict) and wk_fx:
+        weekend_summary["fx_commodity"] = wk_fx
+        print(f"  [周报] 周末外汇商品采集完成")
+    else:
+        weekend_summary["fx_commodity"] = "数据暂缺"
+
+    # 5.6 周末官媒头条
+    wk_news = weekend_realtime.get("news_headlines", {})
+    if isinstance(wk_news, dict) and wk_news:
+        weekend_summary["news_headlines"] = wk_news
+        print(f"  [周报] 周末官媒头条采集完成")
+    else:
+        weekend_summary["news_headlines"] = "数据暂缺"
+
+    summary["weekend_realtime"] = weekend_summary
+
+    # 6. 周报分析指引
     summary["weekly_analysis_guide"] = {
-        "structure": "周报应包含: 本周市场回顾/主线叙事演变/板块轮动/钱三强选股表现/下周策略展望",
-        "data_reference": "weekly_reports(每日报告预览) + weekly_telegraph(电报热点) + latest_daily_summary(最新收盘数据) + latest_qsq(选股结果)",
-        "note": "周报不限于单日视角，应从周维度分析主线叙事的演变和板块轮动趋势",
+        "structure": "周报应包含: 本周市场回顾/主线叙事演变/电报信号追踪/板块轮动/钱三强选股表现/周末消息面/下周策略展望",
+        "data_reference": "weekly_reports(每日报告预览) + weekly_telegraph(电报热点) + weekend_realtime(周末实时消息面+外围市场) + latest_daily_summary(最新收盘数据) + latest_qsq(选股结果)",
+        "note": "周报不限于单日视角，应从周维度分析主线叙事的演变和板块轮动趋势。周末消息面（政策发布/外围市场变动）是下周策略展望的重要依据",
     }
 
     return summary

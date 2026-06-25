@@ -1688,11 +1688,10 @@ def run_data_quality_check(data, data_quality):
 def fetch_weekly_data():
     """v2.0: 周报数据采集
 
-    不调用实时API（周末市场休市），而是读取本周已存入仓库的数据:
-    - 历史报告 (reports/ 目录下本周的MD文件)
-    - 电报归档 (data/cls_telegraph_archive/ 本周的JSON文件)
-    - 数据摘要 (data/data_summary.json 最新版本)
-    - 钱三强选股结果 (data/qian_sanqiang_results.json)
+    采集两部分数据:
+    A. 周末实时数据（财联社电报/页面、美股、港股、外汇商品、官媒头条）
+       → 周末政策常在周六周日发布，美股周五夜盘影响周一A股
+    B. 本周归档数据（每日报告、电报归档、最新数据摘要、钱三强选股）
 
     输出: data/raw_data_weekly.json
     """
@@ -1710,19 +1709,110 @@ def fetch_weekly_data():
 
     print(f"本周日期范围: {week_dates[0]} ~ {week_dates[-1]}")
 
+    data_quality = {}
     weekly_data = {
         "mode": "weekly",
         "fetch_time": today.strftime('%Y-%m-%d %H:%M:%S'),
         "week_start": week_dates[0],
         "week_end": week_dates[-1],
+        # A. 周末实时数据
+        "weekend_realtime": {},
+        # B. 本周归档数据
         "daily_reports": {},
         "telegraph_archive": {},
         "latest_summary": {},
         "latest_qsq": {},
     }
 
-    # 1. 读取本周每日报告
-    print("\n[1/4] 读取本周每日报告...")
+    # ================================================================
+    # A. 周末实时数据采集（市场休市但消息面不休）
+    # ================================================================
+
+    # --- A1. 财联社电报（实时采集+归档）---
+    print("\n[A1/6] 周末实时财联社电报采集...")
+    try:
+        cls_telegraph = fetch_cls_telegraph(data_quality)
+        weekly_data["weekend_realtime"]["cls_telegraph"] = cls_telegraph
+        print(f"  采集到 {cls_telegraph.get('count', 0)} 条电报")
+    except Exception as e:
+        print(f"  [WARN] 电报采集失败: {e}")
+        weekly_data["weekend_realtime"]["cls_telegraph"] = {"error": str(e)}
+
+    # --- A2. 财联社页面（深度/VIP/日历/首页）---
+    print("\n[A2/6] 周末实时财联社页面采集...")
+    try:
+        cls_pages = fetch_cls_pages(data_quality)
+        weekly_data["weekend_realtime"]["cls_pages"] = cls_pages
+        # VIP信息提取
+        try:
+            from vip_extractor import extract_vip_info
+            vip_data_section = cls_pages.get("VIP文章", {}) if isinstance(cls_pages, dict) else {}
+            vip_articles = vip_data_section.get("articles", []) if isinstance(vip_data_section, dict) else []
+            if vip_articles:
+                # 尝试获取Tushare pro实例
+                pro = None
+                try:
+                    import tushare as ts
+                    ts.set_token("8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365")
+                    pro = ts.pro_api()
+                except Exception:
+                    pass
+                vip_info = extract_vip_info(vip_articles, pro=pro)
+                weekly_data["weekend_realtime"]["vip_info"] = vip_info
+        except Exception as e:
+            print(f"  [WARN] VIP提取失败: {e}")
+    except Exception as e:
+        print(f"  [WARN] 页面采集失败: {e}")
+        weekly_data["weekend_realtime"]["cls_pages"] = {"error": str(e)}
+
+    # --- A3. 美股盘前/收盘（周五夜盘 = 周六凌晨北京时间）---
+    print("\n[A3/6] 周末实时美股数据采集...")
+    try:
+        us_premarket = fetch_us_premarket(data_quality)
+        weekly_data["weekend_realtime"]["us_premarket"] = us_premarket
+        print(f"  美股数据采集完成")
+    except Exception as e:
+        print(f"  [WARN] 美股采集失败: {e}")
+        weekly_data["weekend_realtime"]["us_premarket"] = {"error": str(e)}
+
+    # --- A4. 港股指数（周末可能有隔夜变动）---
+    print("\n[A4/6] 周末实时港股数据采集...")
+    try:
+        hk_index = fetch_hk_index(data_quality)
+        weekly_data["weekend_realtime"]["hk_index"] = hk_index
+        print(f"  港股数据采集完成")
+    except Exception as e:
+        print(f"  [WARN] 港股采集失败: {e}")
+        weekly_data["weekend_realtime"]["hk_index"] = {"error": str(e)}
+
+    # --- A5. 外汇/商品（美元/人民币/原油/黄金）---
+    print("\n[A5/6] 周末实时外汇商品采集...")
+    try:
+        fx_commodity = fetch_fx_commodity(data_quality)
+        weekly_data["weekend_realtime"]["fx_commodity"] = fx_commodity
+        print(f"  外汇商品采集完成")
+    except Exception as e:
+        print(f"  [WARN] 外汇商品采集失败: {e}")
+        weekly_data["weekend_realtime"]["fx_commodity"] = {"error": str(e)}
+
+    # --- A6. 官方媒体头条（上海证券报/证券时报/人民日报/新闻联播）---
+    print("\n[A6/6] 周末实时官方媒体头条采集...")
+    try:
+        # 周末用今天的日期
+        today_str = today.strftime('%Y%m%d')
+        news_headlines = fetch_news_headlines(data_quality, today_str)
+        weekly_data["weekend_realtime"]["news_headlines"] = news_headlines
+        print(f"  官媒头条采集完成")
+    except Exception as e:
+        print(f"  [WARN] 官媒头条采集失败: {e}")
+        weekly_data["weekend_realtime"]["news_headlines"] = {"error": str(e)}
+
+    # ================================================================
+    # B. 本周归档数据读取
+    # ================================================================
+
+    # --- B1. 读取本周每日报告 ---
+    print("\n[B1/4] 读取本周每日报告...")
     for date_str in week_dates:
         # 查找该日期的所有报告文件
         for report_type in ["晨报", "午报", "晚报"]:
@@ -1745,8 +1835,8 @@ def fetch_weekly_data():
     report_count = sum(len(v) for v in weekly_data["daily_reports"].values())
     print(f"  本周报告总数: {report_count} 篇")
 
-    # 2. 读取本周电报归档
-    print("\n[2/4] 读取本周电报归档...")
+    # --- B2. 读取本周电报归档 ---
+    print("\n[B2/4] 读取本周电报归档...")
     total_telegraph = 0
     for date_str in week_dates:
         archive_path = os.path.join(archive_dir, f"{date_str}.json")
@@ -1780,8 +1870,8 @@ def fetch_weekly_data():
 
     print(f"  本周电报总数: {total_telegraph} 条")
 
-    # 3. 读取最新数据摘要
-    print("\n[3/4] 读取最新数据摘要...")
+    # --- B3. 读取最新数据摘要 ---
+    print("\n[B3/4] 读取最新数据摘要...")
     summary_path = os.path.join(data_dir, "data_summary.json")
     if os.path.exists(summary_path):
         try:
@@ -1797,8 +1887,8 @@ def fetch_weekly_data():
         except Exception as e:
             print(f"  [WARN] 读取摘要失败: {e}")
 
-    # 4. 读取最新钱三强选股结果
-    print("\n[4/4] 读取最新钱三强选股结果...")
+    # --- B4. 读取最新钱三强选股结果 ---
+    print("\n[B4/4] 读取最新钱三强选股结果...")
     qsq_path = os.path.join(data_dir, "qian_sanqiang_results.json")
     if os.path.exists(qsq_path):
         try:
