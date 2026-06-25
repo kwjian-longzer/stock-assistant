@@ -1,45 +1,42 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-热点热度量化追踪器
+热点板块热度量化追踪器 v2
 
-基于三个维度计算市场热点的按日热度，绘制时间-热度变化曲线：
+参考观澜网站设计，用历史数据库数据构建多板块对比热度曲线：
+  - 仅用两个因子：板块资金流向 + 涨停板数量
+  - 数据全部从Tushare数据库获取（2周历史），不依赖自身积累
+  - 多个热点板块在同一图表中相对比
+  - Y轴: -100 ~ +100（资金流入为正，流出为负）
 
-H(t) = W1 * 资金流向因子 + W2 * 信息密度因子 + W3 * 涨停密度因子
+热度公式:
+  H(t) = W1 * 资金流向标准化 + W2 * 涨停密度标准化
 
-权重: W1=0.5（资金最重要）, W2=0.3, W3=0.2
+  W1 = 0.6（资金流向为主）
+  W2 = 0.4（涨停密度为辅）
 
 数据源:
-  - Tushare moneyflow: 个股资金流向（聚合到板块）
-  - 电报归档: 信息密度（关键词提及次数）
-  - Tushare limit_list_d / daily: 涨停个股统计
+  - Tushare moneyflow: 按日获取个股资金流向，聚合到行业
+  - Tushare daily / 东方财富涨停池: 涨停个股统计
 
-生命周期判定:
-  - 崛起: 连续3日热度上升 + H>50
-  - 高潮: H>70 且当日≥近3日峰值
-  - 退烧: 热度连续2日下降 + 资金净流出
-  - 冷却: H<30（不纳入追踪）
-
-资金流向生命周期:
-  主力开始进 → 其他资金跟进 → 主力退出 → 散户站岗
+用法:
+  from heat_tracker import compute_sector_heat_comparison
+  result = compute_sector_heat_comparison(pro, stock_basic, sectors_config, days=14)
 """
 
 import json
 import os
 import sys
-import re
 from collections import defaultdict, Counter
 from datetime import datetime, timedelta
 
-# 热度计算权重
-W_CAPITAL = 0.5  # 资金流向
-W_INFO = 0.3     # 信息密度
-W_LIMIT = 0.2    # 涨停密度
+# 权重
+W_CAPITAL = 0.6
+W_LIMIT = 0.4
 
-# 热度阈值
-HEAT_THRESHOLD_CLIMAX = 70
-HEAT_THRESHOLD_RISING = 50
-HEAT_THRESHOLD_COOL = 30
+# 标准化基准
+MAX_CAPITAL_PER_SECTOR = 300000  # 单板块单日30亿净流入=满分100（万元）
+MAX_LIMIT_DENSITY = 10  # 10%涨停率=满分100
 
 
 def _ensure_tushare():
@@ -56,97 +53,86 @@ def _ensure_tushare():
         return ts
 
 
-def compute_sector_capital_flow(pro, trade_date, stock_basic_list):
-    """计算各行业的资金流向（聚合个股moneyflow到行业维度）
+def get_trade_dates(pro, days=14):
+    """获取最近N个交易日（从Tushare交易日历获取）
 
     Args:
         pro: Tushare pro_api
-        trade_date: 交易日期 YYYYMMDD
-        stock_basic_list: 股票基础信息列表
+        days: 自然日天数（会自动过滤非交易日）
 
     Returns:
-        dict: {行业名: {net_mf_amount, stock_count, buy_lg_amount, sell_lg_amount}}
+        list: 交易日列表，格式 YYYYMMDD，从旧到新
+    """
+    today = datetime.now()
+    start_date = (today - timedelta(days=days + 10)).strftime('%Y%m%d')
+    end_date = today.strftime('%Y%m%d')
+
+    try:
+        df = pro.trade_cal(exchange='SSE', start_date=start_date, end_date=end_date,
+                           is_open='1', fields='cal_date')
+        trade_dates = sorted(df['cal_date'].tolist())
+        # 取最近 days 个自然日内的交易日
+        cutoff = (today - timedelta(days=days)).strftime('%Y%m%d')
+        trade_dates = [d for d in trade_dates if d >= cutoff]
+        return trade_dates
+    except Exception as e:
+        # 降级：手动生成工作日
+        print(f"[WARN] 交易日历获取失败({e})，降级为工作日估算")
+        dates = []
+        d = today
+        while len(dates) < 10:
+            if d.weekday() < 5:
+                dates.append(d.strftime('%Y%m%d'))
+            d -= timedelta(days=1)
+        return sorted(dates)
+
+
+def fetch_daily_moneyflow(pro, trade_date, stock_basic_list):
+    """获取某日全市场资金流向，按行业聚合
+
+    Returns:
+        dict: {行业名: {net_mf_amount, buy_lg_amount, sell_lg_amount, stock_count}}
     """
     try:
-        df_mf = pro.moneyflow(trade_date=trade_date)
-        if df_mf is None or len(df_mf) == 0:
+        df = pro.moneyflow(trade_date=trade_date)
+        if df is None or len(df) == 0:
             return {}
 
-        # 合并行业信息
         industry_map = {s['ts_code']: s.get('industry', '') for s in stock_basic_list}
 
         sector_flow = defaultdict(lambda: {
             'net_mf_amount': 0.0,
             'buy_lg_amount': 0.0,
             'sell_lg_amount': 0.0,
-            'buy_el_amount': 0.0,
-            'sell_el_amount': 0.0,
             'stock_count': 0,
         })
 
-        for _, row in df_mf.iterrows():
+        for _, row in df.iterrows():
             ts_code = row.get('ts_code', '')
-            industry = industry_map.get(ts_code, '未知')
+            industry = industry_map.get(ts_code, '其他')
             sector_flow[industry]['net_mf_amount'] += float(row.get('net_mf_amount', 0) or 0)
             sector_flow[industry]['buy_lg_amount'] += float(row.get('buy_lg_amount', 0) or 0)
             sector_flow[industry]['sell_lg_amount'] += float(row.get('sell_lg_amount', 0) or 0)
-            sector_flow[industry]['buy_el_amount'] += float(row.get('buy_el_amount', 0) or 0)
-            sector_flow[industry]['sell_el_amount'] += float(row.get('sell_el_amount', 0) or 0)
             sector_flow[industry]['stock_count'] += 1
 
         return dict(sector_flow)
     except Exception as e:
-        print(f"[WARN] 资金流向计算失败: {e}")
+        print(f"[WARN] 资金流向获取失败({trade_date}): {e}")
         return {}
 
 
-def compute_info_density(telegraph_archive_dir, keywords, target_date_str):
-    """计算某热点的信息密度（电报提及次数）
+def fetch_limit_up_stocks(pro, trade_date, stock_basic_list):
+    """获取某日涨停个股，按行业统计
 
-    Args:
-        telegraph_archive_dir: 电报归档目录
-        keywords: 热点关键词列表
-        target_date_str: 目标日期 YYYY-MM-DD
-
-    Returns:
-        int: 当日电报中包含关键词的条数
-    """
-    archive_path = os.path.join(telegraph_archive_dir, f"{target_date_str}.json")
-    if not os.path.exists(archive_path):
-        return 0
-
-    try:
-        with open(archive_path, 'r', encoding='utf-8') as f:
-            telegraphs = json.load(f)
-
-        count = 0
-        for tel in telegraphs:
-            title = tel.get('title', '') + ' ' + tel.get('content', '')
-            for kw in keywords:
-                if kw in title:
-                    count += 1
-                    break
-        return count
-    except Exception:
-        return 0
-
-
-def compute_limit_up_density(pro, trade_date, stock_basic_list):
-    """计算各行业的涨停密度
-
-    优先使用Tushare limit_list_d，无权限时降级到东方财富涨停池API。
-
-    Args:
-        pro: Tushare pro_api
-        trade_date: 交易日期
-        stock_basic_list: 股票基础信息
+    方案1: Tushare limit_list_d（需权限）
+    方案2: Tushare daily涨跌幅>=9.8%筛选（最可靠）
+    方案3: 东方财富涨停池API（备用）
 
     Returns:
         dict: {行业名: {limit_up_count, total_count, density}}
     """
     industry_map = {s['ts_code']: s.get('industry', '') for s in stock_basic_list}
     industry_total = Counter(industry_map.values())
-
     limit_by_industry = defaultdict(int)
 
     # 方案1: Tushare limit_list_d
@@ -155,39 +141,33 @@ def compute_limit_up_density(pro, trade_date, stock_basic_list):
         if df_limit is not None and len(df_limit) > 0:
             for _, row in df_limit.iterrows():
                 ts_code = row.get('ts_code', '')
-                industry = industry_map.get(ts_code, row.get('industry', '未知'))
+                industry = industry_map.get(ts_code, row.get('industry', '其他'))
+                limit_by_industry[industry] += 1
+            if limit_by_industry:
+                result = {}
+                for ind, count in limit_by_industry.items():
+                    total = industry_total.get(ind, 1)
+                    result[ind] = {
+                        'limit_up_count': count,
+                        'total_count': total,
+                        'density': count / total * 100 if total > 0 else 0,
+                    }
+                return result
+    except Exception:
+        pass
+
+    # 方案2: Tushare daily涨跌幅筛选（最可靠）
+    try:
+        df = pro.daily(trade_date=trade_date, fields='ts_code,trade_date,pct_chg')
+        if df is not None and len(df) > 0:
+            # 涨停判断: 主板>=9.8%, 科创板/创业板>=19.5%
+            limit_up = df[(df['pct_chg'] >= 9.8) | (df['pct_chg'] >= 19.5)]
+            for _, row in limit_up.iterrows():
+                ts_code = row.get('ts_code', '')
+                industry = industry_map.get(ts_code, '其他')
                 limit_by_industry[industry] += 1
     except Exception:
-        # 方案2: 东方财富涨停池API（无需权限）
-        try:
-            import requests
-            # 东方财富涨停池API
-            url = "https://push2ex.eastmoney.com/getTopicZTPool"
-            params = {
-                "ut": "7eea3edcaed734bea9cbfc24409ed989",
-                "dpt": "wz.ztzt",
-                "Ession": "128940000",
-                "date": trade_date,
-                "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21",
-                "sort": "f3",
-                "order": "1",
-                "size": "500",
-            }
-            r = requests.get(url, params=params, timeout=10)
-            data = r.json()
-            pool = data.get('data', {}).get('pool', [])
-            for item in pool:
-                # 东方财富代码: 1.600xxx(沪), 0.000xxx(深)
-                raw_code = item.get('c', '')
-                market = item.get('m', 0)
-                if market == 1:
-                    ts_code = f"{raw_code}.SH"
-                else:
-                    ts_code = f"{raw_code}.SZ"
-                industry = industry_map.get(ts_code, '未知')
-                limit_by_industry[industry] += 1
-        except Exception:
-            pass  # 两个方案都失败，返回空
+        pass
 
     if not limit_by_industry:
         return {}
@@ -203,320 +183,378 @@ def compute_limit_up_density(pro, trade_date, stock_basic_list):
     return result
 
 
-def calculate_heat_score(capital_flow, info_density, limit_density, max_capital=None):
-    """计算单日热度分数
+def calculate_sector_heat(net_capital, limit_density):
+    """计算单板块单日热度分数
 
-    H(t) = W1 * 资金流向因子 + W2 * 信息密度因子 + W3 * 涨停密度因子
+    H = 0.6 * 资金流向因子 + 0.4 * 涨停密度因子
 
-    资金流出会降低热度但不会让热度为负（资金流出=热度归零而非负值）。
+    资金流入 → 正热度；资金流出 → 负热度
+    Y轴范围: -100 ~ +100
 
     Args:
-        capital_flow: 板块净流入金额（万元）
-        info_density: 电报提及次数
+        net_capital: 板块净流入金额（万元），正值=流入，负值=流出
         limit_density: 涨停密度百分比
-        max_capital: 标准化用最大资金额（None则自动估算）
 
     Returns:
-        float: 热度分数 0-100
+        float: 热度分数 -100 ~ +100
     """
-    # 1. 资金流向因子（标准化到0-100）
-    if max_capital is None:
-        max_capital = 500000  # 默认50亿作为标准化基准（万元）
-    # 资金流入: 正向贡献热度；资金流出: 热度归零（不贡献负热度）
-    if capital_flow > 0:
-        capital_factor = min(capital_flow / max_capital * 100, 100)
+    # 1. 资金流向因子（-100 ~ +100）
+    if net_capital >= 0:
+        capital_factor = min(net_capital / MAX_CAPITAL_PER_SECTOR * 100, 100)
     else:
-        capital_factor = 0  # 资金流出时，资金维度热度为0
+        capital_factor = -min(abs(net_capital) / MAX_CAPITAL_PER_SECTOR * 100, 100)
 
-    # 2. 信息密度因子（标准化到0-100）
-    info_factor = min(info_density / 20 * 100, 100)  # 20条电报=满分
+    # 2. 涨停密度因子（0 ~ 100，无负值）
+    limit_factor = min(limit_density / MAX_LIMIT_DENSITY * 100, 100)
 
-    # 3. 涨停密度因子（标准化到0-100）
-    limit_factor = min(limit_density * 10, 100)  # 10%涨停率=满分
-
-    # 加权计算
-    heat = W_CAPITAL * capital_factor + W_INFO * info_factor + W_LIMIT * limit_factor
+    # 加权
+    heat = W_CAPITAL * capital_factor + W_LIMIT * limit_factor
     return round(heat, 1)
 
 
-def determine_lifecycle(heat_series, capital_series):
-    """判定热点生命周期状态
+def compute_sector_heat_comparison(pro, stock_basic_list, sectors_config, days=14):
+    """计算多板块热度对比（核心函数）
+
+    从Tushare数据库获取2周历史数据，计算多个热点板块的按日热度曲线。
 
     Args:
-        heat_series: 近N日热度列表 [h1, h2, ..., hN]（旧→新）
-        capital_series: 近N日资金流向列表
+        pro: Tushare pro_api
+        stock_basic_list: 股票基础信息列表
+        sectors_config: 板块配置列表，每个元素:
+            {
+                "name": "AI算力",
+                "industries": ["半导体", "通信设备", ...],  # Tushare行业名
+                "keywords": ["算力", "AI", "光模块"],  # 备用关键词
+                "stock_codes": ["688256.SH", ...],  # 可选: 精确股票列表
+            }
+        days: 获取多少自然日的历史数据
 
     Returns:
-        dict: {lifecycle, trend, description}
+        dict: 多板块热度对比数据
     """
-    if len(heat_series) < 2:
-        return {"lifecycle": "未知", "trend": "无数据", "description": "数据不足"}
+    # 1. 获取交易日列表
+    trade_dates = get_trade_dates(pro, days=days)
+    print(f"[INFO] 获取到 {len(trade_dates)} 个交易日: {trade_dates[0]} ~ {trade_dates[-1]}")
 
-    current_heat = heat_series[-1]
-    prev_heat = heat_series[-2]
+    # 2. 预构建行业→股票映射
+    industry_to_stocks = defaultdict(list)
+    for s in stock_basic_list:
+        ind = s.get('industry', '')
+        if ind:
+            industry_to_stocks[ind].append(s['ts_code'])
 
-    # 趋势判断
-    rising_count = sum(1 for i in range(1, len(heat_series))
-                       if heat_series[i] > heat_series[i-1])
-    falling_count = sum(1 for i in range(1, len(heat_series))
-                        if heat_series[i] < heat_series[i-1])
+    # 3. 逐日获取资金流向和涨停数据
+    daily_capital = {}  # {date: {行业: net_mf}}
+    daily_limit = {}     # {date: {行业: limit_data}}
+    daily_total_capital = {}  # {date: 全市场总净流入}
 
-    # 资金趋势
+    for date in trade_dates:
+        # 资金流向
+        mf = fetch_daily_moneyflow(pro, date, stock_basic_list)
+        daily_capital[date] = mf
+
+        # 全市场总净流入（用于标准化参考）
+        daily_total_capital[date] = sum(s.get('net_mf_amount', 0) for s in mf.values())
+
+        # 涨停数据
+        lim = fetch_limit_up_stocks(pro, date, stock_basic_list)
+        daily_limit[date] = lim
+
+        print(f"  [{date}] 资金流向: {len(mf)} 个行业, 涨停: {sum(d.get('limit_up_count',0) for d in lim.values())} 只")
+
+    # 4. 按板块配置聚合热度
+    sector_results = []
+
+    for sec_cfg in sectors_config:
+        sec_name = sec_cfg["name"]
+        sec_industries = sec_cfg.get("industries", [])
+        sec_stock_codes = set(sec_cfg.get("stock_codes", []))
+
+        heat_series = []
+        capital_series = []
+        limit_series = []
+        limit_count_series = []
+
+        for date in trade_dates:
+            # 聚合该板块的资金流向
+            if sec_stock_codes:
+                # 用精确股票列表
+                mf = daily_capital.get(date, {})
+                # moneyflow是按个股的，需要从全量数据中筛选
+                # 这里简化: 用行业聚合
+                net_cap = sum(mf.get(ind, {}).get('net_mf_amount', 0) for ind in sec_industries)
+            else:
+                # 用行业聚合
+                mf = daily_capital.get(date, {})
+                net_cap = sum(mf.get(ind, {}).get('net_mf_amount', 0) for ind in sec_industries)
+
+            # 聚合涨停密度
+            lim = daily_limit.get(date, {})
+            total_stocks = sum(len(industry_to_stocks.get(ind, [])) for ind in sec_industries)
+            total_limit = sum(lim.get(ind, {}).get('limit_up_count', 0) for ind in sec_industries)
+            limit_density = (total_limit / total_stocks * 100) if total_stocks > 0 else 0
+
+            # 计算热度
+            heat = calculate_sector_heat(net_cap, limit_density)
+
+            heat_series.append(heat)
+            capital_series.append(net_cap)
+            limit_series.append(limit_density)
+            limit_count_series.append(total_limit)
+
+        # 判定生命周期
+        lifecycle = _determine_lifecycle(heat_series, capital_series)
+
+        sector_results.append({
+            "name": sec_name,
+            "industries": sec_industries,
+            "trade_dates": trade_dates,
+            "heat_series": heat_series,
+            "capital_series": capital_series,
+            "limit_series": limit_count_series,
+            "current_heat": heat_series[-1] if heat_series else 0,
+            "lifecycle": lifecycle,
+        })
+
+    # 5. 生成多板块对比图表
+    chart_text = render_multi_sector_chart(trade_dates, sector_results)
+
+    return {
+        "trade_dates": trade_dates,
+        "sectors": sector_results,
+        "chart_text": chart_text,
+    }
+
+
+def _determine_lifecycle(heat_series, capital_series):
+    """判定板块生命周期状态"""
+    if len(heat_series) < 3:
+        return {"state": "数据不足", "trend": "-", "description": "历史数据不足3日"}
+
+    current = heat_series[-1]
+    prev = heat_series[-2]
+    prev3 = heat_series[-3]
+
+    rising = current > prev > prev3
+    falling = current < prev < prev3
     current_capital = capital_series[-1] if capital_series else 0
     prev_capital = capital_series[-2] if len(capital_series) >= 2 else 0
-    capital_turning_negative = (prev_capital > 0 and current_capital < 0)
+    capital_reversing = (prev_capital > 0 and current_capital < 0)
 
-    # 生命周期判定
-    if current_heat < HEAT_THRESHOLD_COOL:
-        return {"lifecycle": "冷却", "trend": "↓", "description": f"热度{current_heat}低于阈值{HEAT_THRESHOLD_COOL}"}
+    if current >= 50:
+        if falling and capital_reversing:
+            return {"state": "退烧", "trend": "↓↓",
+                    "description": f"热度{current:.0f}从高位回落，资金转流出"}
+        return {"state": "高潮", "trend": "↑↑",
+                "description": f"热度{current:.0f}处于高位，资金持续流入"}
 
-    if current_heat >= HEAT_THRESHOLD_CLIMAX:
-        # 高潮期：检查是否在退烧
-        if current_heat < prev_heat and capital_turning_negative:
-            return {"lifecycle": "退烧", "trend": "↓↓",
-                    "description": f"热度{current_heat}从峰值回落，资金转流出"}
-        return {"lifecycle": "高潮", "trend": "↑↑",
-                "description": f"热度{current_heat}处于高位"}
+    if rising and current >= 20:
+        return {"state": "崛起", "trend": "↑",
+                "description": f"热度{current:.0f}连续3日上升"}
 
-    if rising_count >= 2 and current_heat >= HEAT_THRESHOLD_RISING:
-        return {"lifecycle": "崛起", "trend": "↑",
-                "description": f"热度{current_heat}连续上升{rising_count}日"}
+    if falling and current_capital < 0:
+        return {"state": "退烧", "trend": "↓",
+                "description": f"热度{current:.0f}连续下降，资金净流出"}
 
-    if falling_count >= 2 and current_capital < 0:
-        return {"lifecycle": "退烧", "trend": "↓",
-                "description": f"热度{current_heat}连续下降，资金净流出"}
-
-    if current_heat > prev_heat:
-        return {"lifecycle": "崛起", "trend": "↑",
-                "description": f"热度{current_heat}上升中"}
+    if current > prev:
+        return {"state": "崛起", "trend": "↑",
+                "description": f"热度{current:.0f}上升中"}
     else:
-        return {"lifecycle": "退烧", "trend": "↓",
-                "description": f"热度{current_heat}有所回落"}
+        return {"state": "退烧", "trend": "↓",
+                "description": f"热度{current:.0f}有所回落"}
 
 
-def determine_capital_phase(capital_series, large_buy_series, large_sell_series):
-    """判定资金流向生命周期阶段
+def render_multi_sector_chart(trade_dates, sector_results):
+    """生成多板块对比热度曲线（文本可视化）
 
-    主力开始进 → 其他资金跟进 → 主力退出 → 散户站岗
+    参考观澜网站设计：多板块在同一图表中对比，Y轴-100~+100
 
     Args:
-        capital_series: 近N日净流入金额
-        large_buy_series: 近N日大单买入
-        large_sell_series: 近N日大单卖出
+        trade_dates: 交易日列表 YYYYMMDD
+        sector_results: 板块热度数据列表
 
     Returns:
-        str: 生命周期阶段描述
+        str: Markdown格式的热度对比图表
     """
-    if len(capital_series) < 3:
-        return "数据不足"
-
-    current_net = capital_series[-1]
-    prev_net = capital_series[-2]
-    prev2_net = capital_series[-3] if len(capital_series) >= 3 else 0
-
-    # 判断连续流入/流出
-    inflow_3d = all(n > 0 for n in capital_series[-3:]) if len(capital_series) >= 3 else False
-    outflow_2d = all(n < 0 for n in capital_series[-2:]) if len(capital_series) >= 2 else False
-
-    # 大单趋势
-    current_lg_buy = large_buy_series[-1] if large_buy_series else 0
-    current_lg_sell = large_sell_series[-1] if large_sell_series else 0
-    large_net = current_lg_buy - current_lg_sell
-
-    if inflow_3d and large_net > 0:
-        if current_net > prev_net:
-            return "主力持续流入，其他资金跟进"
-        else:
-            return "主力开始进"
-    elif outflow_2d and large_net < 0:
-        if current_net < prev_net:
-            return "主力退出"
-        else:
-            return "散户站岗"
-    elif prev_net > 0 and current_net < 0:
-        return "主力退出（资金由正转负）"
-    elif current_net > 0 and prev_net < 0:
-        return "主力开始进（资金由负转正）"
-    else:
-        return "资金观望"
-
-
-def render_heat_curve(heat_series, capital_series, dates, hotspot_name, lifecycle_info):
-    """生成文本可视化的时间-热度变化曲线
-
-    Args:
-        heat_series: 热度列表
-        capital_series: 资金流向列表
-        dates: 日期列表
-        hotspot_name: 热点名称
-        lifecycle_info: 生命周期信息
-
-    Returns:
-        str: 文本格式的热度曲线
-    """
-    # 热度符号映射
-    def heat_to_symbol(h):
-        if h < 0:
-            h = abs(h)
-        if h < 15:
-            return '▁'
-        elif h < 30:
-            return '▂'
-        elif h < 45:
-            return '▃'
-        elif h < 55:
-            return '▄'
-        elif h < 65:
-            return '▅'
-        elif h < 75:
-            return '▆'
-        elif h < 85:
-            return '▇'
-        else:
-            return '█'
-
     lines = []
-    lines.append(f"### {hotspot_name} 热度追踪")
+    lines.append("## 板块热度对比曲线（近2周）")
     lines.append("")
-    lines.append(f"**生命周期**: {lifecycle_info['lifecycle']} {lifecycle_info['trend']} | "
-                 f"{lifecycle_info['description']}")
+    lines.append("> 热度 = 0.6×资金流向标准化 + 0.4×涨停密度标准化 | Y轴: -100(资金流出) ~ +100(资金流入)")
+    lines.append("> 数据来源: Tushare moneyflow + 东方财富涨停池 | 时间单位: 交易日")
     lines.append("")
 
+    # 格式化日期标签 MM-DD
+    date_labels = [f"{d[4:6]}-{d[6:8]}" for d in trade_dates]
+
+    # 按当前热度排序板块
+    sorted_sectors = sorted(sector_results, key=lambda x: x.get('current_heat', 0), reverse=True)
+
+    # 生成各板块热度行
+    lines.append("```")
     # 日期行
-    date_labels = "  ".join(d[5:] for d in dates)  # MM-DD
-    # 热度行
-    heat_values = "  ".join(f"{h:.0f}" for h in heat_series)
-    # 曲线行
-    curve = " ".join(heat_to_symbol(h) for h in heat_series)
-    # 资金行
-    capital_values = "  ".join(f"{c/10000:+.1f}亿" for c in capital_series)
+    lines.append("日期        " + "  ".join(f"{d:>5}" for d in date_labels))
+    lines.append("")
+
+    for sec in sorted_sectors:
+        name = sec["name"]
+        heat_series = sec["heat_series"]
+        lifecycle = sec.get("lifecycle", {})
+        state = lifecycle.get("state", "")
+
+        # 热度数值行
+        heat_str = "  ".join(f"{h:>+5.0f}" for h in heat_series)
+        lines.append(f"{name:<10} {heat_str}  [{state}]")
+
+        # 曲线符号行
+        curve = " ".join(_heat_to_symbol(h) for h in heat_series)
+        lines.append(f"{'':>10} {curve}")
+        lines.append("")
+
+    # 资金流向行（各板块）
+    lines.append("--- 板块资金流向(亿元) ---")
+    for sec in sorted_sectors[:5]:  # 只显示Top 5
+        name = sec["name"]
+        cap_series = sec["capital_series"]
+        cap_str = "  ".join(f"{c/10000:>+5.1f}" for c in cap_series)
+        lines.append(f"{name:<10} {cap_str}")
+    lines.append("")
+
+    # 涨停数量行
+    lines.append("--- 板块涨停数量(只) ---")
+    for sec in sorted_sectors[:5]:
+        name = sec["name"]
+        lim_series = sec["limit_series"]
+        lim_str = "  ".join(f"{l:>5}" for l in lim_series)
+        lines.append(f"{name:<10} {lim_str}")
 
     lines.append("```")
-    lines.append(f"日期   {date_labels}")
-    lines.append(f"热度   {heat_values}")
-    lines.append(f"曲线   {curve}")
-    lines.append(f"资金   {capital_values}")
-    lines.append("```")
+    lines.append("")
+
+    # 生命周期汇总表
+    lines.append("### 板块生命周期汇总")
+    lines.append("")
+    lines.append("| 板块 | 当前热度 | 生命周期 | 趋势 | 说明 |")
+    lines.append("|------|---------|---------|------|------|")
+    for sec in sorted_sectors:
+        lc = sec.get("lifecycle", {})
+        lines.append(
+            f"| {sec['name']} | {sec.get('current_heat',0):+.1f} | "
+            f"{lc.get('state','')} | {lc.get('trend','')} | {lc.get('description','')} |"
+        )
     lines.append("")
 
     return '\n'.join(lines)
 
 
-def compute_hotspot_heat(pro, stock_basic_list, telegraph_dir, hotspot_name,
-                         keywords, trade_dates, sector_stocks=None):
-    """计算单个热点的多日热度曲线
+def _heat_to_symbol(h):
+    """热度数值转曲线符号"""
+    if h >= 80:
+        return '█'
+    elif h >= 60:
+        return '▇'
+    elif h >= 40:
+        return '▆'
+    elif h >= 20:
+        return '▅'
+    elif h >= 10:
+        return '▄'
+    elif h >= 0:
+        return '▃'
+    elif h >= -20:
+        return '▂'
+    elif h >= -40:
+        return '▁'
+    else:
+        return ' '  # 深度流出留空
+
+
+# 预定义热点板块配置（基于Tushare实际行业分类名）
+DEFAULT_SECTORS = [
+    {
+        "name": "AI算力",
+        "industries": ["半导体", "通信设备", "IT设备", "元器件"],
+        "keywords": ["算力", "AI", "光模块", "服务器", "液冷"],
+    },
+    {
+        "name": "半导体芯片",
+        "industries": ["半导体", "元器件"],
+        "keywords": ["芯片", "半导体", "先进封装", "HBM"],
+    },
+    {
+        "name": "消费电子",
+        "industries": ["家用电器", "电器仪表", "元器件"],
+        "keywords": ["苹果", "折叠屏", "智能眼镜", "VR"],
+    },
+    {
+        "name": "新能源",
+        "industries": ["电气设备", "化工原料", "化纤"],
+        "keywords": ["锂电池", "储能", "光伏", "固态电池"],
+    },
+    {
+        "name": "机器人",
+        "industries": ["专用机械", "机械基件", "工程机械", "电气设备"],
+        "keywords": ["机器人", "人形机器人", "减速器", "伺服"],
+    },
+    {
+        "name": "低空经济",
+        "industries": ["航空", "船舶", "运输设备"],
+        "keywords": ["低空经济", "eVTOL", "无人机", "商业航天"],
+    },
+    {
+        "name": "医药生物",
+        "industries": ["化学制药", "生物制药", "医疗保健", "中成药"],
+        "keywords": ["创新药", "医疗器械", "CXO"],
+    },
+    {
+        "name": "军工航天",
+        "industries": ["航空", "船舶", "电气设备"],
+        "keywords": ["军工", "商业航天", "卫星"],
+    },
+    {
+        "name": "汽车智驾",
+        "industries": ["汽车配件", "汽车整车", "软件服务"],
+        "keywords": ["智能驾驶", "自动驾驶", "新能源车"],
+    },
+    {
+        "name": "金融科技",
+        "industries": ["证券", "银行", "软件服务", "多元金融"],
+        "keywords": ["数字货币", "金融科技", "信创"],
+    },
+]
+
+
+def generate_heat_report_section(pro=None, stock_basic_list=None, sectors_config=None, days=14):
+    """生成热度对比报告段落（供AI报告引用）
 
     Args:
         pro: Tushare pro_api
         stock_basic_list: 股票基础信息
-        telegraph_dir: 电报归档目录
-        hotspot_name: 热点名称
-        keywords: 热点关键词列表
-        trade_dates: 交易日列表 ['2026-06-20', '2026-06-23', ...]
-        sector_stocks: 该热点涉及的股票代码列表（用于精确资金计算）
+        sectors_config: 板块配置（None则用默认）
+        days: 历史天数
 
     Returns:
-        dict: 热点热度数据
+        str: Markdown格式的热度对比段落
     """
-    heat_series = []
-    capital_series = []
-    info_series = []
-    limit_series = []
-    capital_phase_series = []
-    large_buy_series = []
-    large_sell_series = []
+    if pro is None:
+        ts = _ensure_tushare()
+        ts.set_token("8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365")
+        pro = ts.pro_api()
 
-    for date_str in trade_dates:
-        date_compact = date_str.replace('-', '')
+    if stock_basic_list is None:
+        from vip_extractor import load_stock_database
+        stock_basic_list = load_stock_database(pro)
 
-        # 1. 资金流向
-        sector_flow = compute_sector_capital_flow(pro, date_compact, stock_basic_list)
+    if sectors_config is None:
+        sectors_config = DEFAULT_SECTORS
 
-        # 如果有精确股票列表，用个股聚合；否则用行业聚合
-        if sector_stocks:
-            try:
-                df_mf = pro.moneyflow(trade_date=date_compact)
-                if df_mf is not None and len(df_mf) > 0:
-                    stock_set = set(sector_stocks)
-                    df_hot = df_mf[df_mf['ts_code'].isin(stock_set)]
-                    net_capital = float(df_hot['net_mf_amount'].sum()) if len(df_hot) > 0 else 0
-                    buy_lg = float(df_hot['buy_lg_amount'].sum()) if len(df_hot) > 0 else 0
-                    sell_lg = float(df_hot['sell_lg_amount'].sum()) if len(df_hot) > 0 else 0
-                else:
-                    net_capital, buy_lg, sell_lg = 0, 0, 0
-            except Exception:
-                net_capital, buy_lg, sell_lg = 0, 0, 0
-        else:
-            # 行业聚合
-            total_net = sum(s.get('net_mf_amount', 0) for s in sector_flow.values())
-            total_buy_lg = sum(s.get('buy_lg_amount', 0) for s in sector_flow.values())
-            total_sell_lg = sum(s.get('sell_lg_amount', 0) for s in sector_flow.values())
-            net_capital = total_net
-            buy_lg = total_buy_lg
-            sell_lg = total_sell_lg
-
-        capital_series.append(net_capital)
-        large_buy_series.append(buy_lg)
-        large_sell_series.append(sell_lg)
-
-        # 2. 信息密度
-        info_count = compute_info_density(telegraph_dir, keywords, date_str)
-        info_series.append(info_count)
-
-        # 3. 涨停密度
-        limit_data = compute_limit_up_density(pro, date_compact, stock_basic_list)
-        # 取相关行业的平均涨停密度
-        if sector_stocks and limit_data:
-            # 用个股所在行业的平均涨停密度
-            related_industries = set()
-            for s in stock_basic_list:
-                if s['ts_code'] in (sector_stocks or []):
-                    if s.get('industry'):
-                        related_industries.add(s['industry'])
-            avg_density = sum(limit_data.get(ind, {}).get('density', 0) for ind in related_industries) / max(len(related_industries), 1)
-        elif limit_data:
-            avg_density = sum(d.get('density', 0) for d in limit_data.values()) / max(len(limit_data), 1)
-        else:
-            avg_density = 0
-        limit_series.append(avg_density)
-
-        # 计算单日热度
-        heat = calculate_heat_score(net_capital, info_count, avg_density)
-        heat_series.append(heat)
-
-        # 资金阶段
-        phase = determine_capital_phase(capital_series, large_buy_series, large_sell_series)
-        capital_phase_series.append(phase)
-
-    # 生命周期判定
-    lifecycle_info = determine_lifecycle(heat_series, capital_series)
-
-    # 生成热度曲线
-    curve_text = render_heat_curve(
-        heat_series, capital_series, trade_dates,
-        hotspot_name, lifecycle_info
-    )
-
-    # 当前资金阶段
-    current_capital_phase = capital_phase_series[-1] if capital_phase_series else "数据不足"
-
-    return {
-        "hotspot_name": hotspot_name,
-        "keywords": keywords,
-        "trade_dates": trade_dates,
-        "heat_series": heat_series,
-        "capital_series": capital_series,
-        "info_series": info_series,
-        "limit_series": limit_series,
-        "capital_phase": current_capital_phase,
-        "lifecycle": lifecycle_info,
-        "heat_curve_text": curve_text,
-        "current_heat": heat_series[-1] if heat_series else 0,
-    }
+    result = compute_sector_heat_comparison(pro, stock_basic_list, sectors_config, days=days)
+    return result["chart_text"]
 
 
 if __name__ == "__main__":
     # 测试
+    print("=== 热度追踪器 v2 测试 ===\n")
+
     ts = _ensure_tushare()
     ts.set_token("8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365")
     pro = ts.pro_api()
@@ -524,29 +562,6 @@ if __name__ == "__main__":
     from vip_extractor import load_stock_database
     stock_db = load_stock_database(pro)
 
-    # 测试: 计算AI算力热点近5日热度
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    telegraph_dir = os.path.join(script_dir, "data", "cls_telegraph_archive")
-
-    # 生成近5个交易日
-    today = datetime.now()
-    trade_dates = []
-    for i in range(7, 0, -1):
-        d = today - timedelta(days=i)
-        if d.weekday() < 5:  # 周一到周五
-            trade_dates.append(d.strftime('%Y-%m-%d'))
-
-    print(f"测试交易日: {trade_dates}")
-
-    result = compute_hotspot_heat(
-        pro, stock_db, telegraph_dir,
-        "AI算力产业链",
-        ["算力", "AI", "光模块", "服务器", "液冷"],
-        trade_dates,
-        sector_stocks=None  # 用行业聚合
-    )
-
-    print(result["heat_curve_text"])
-    print(f"当前热度: {result['current_heat']}")
-    print(f"生命周期: {result['lifecycle']}")
-    print(f"资金阶段: {result['capital_phase']}")
+    # 使用默认板块配置
+    chart = generate_heat_report_section(pro, stock_db, DEFAULT_SECTORS, days=14)
+    print(chart)

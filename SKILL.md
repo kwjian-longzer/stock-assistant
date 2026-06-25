@@ -26,7 +26,7 @@ stock-assistant/
 ├── validate_report.py    # 报告校验 - v2.0: 12条红线(含热点追踪/龙脉定位/推理链/交叉验证/热度曲线/金股汇总表)
 ├── report_quality_evaluator.py  # v2.0质量评分系统 - 10维度×10分=100分
 ├── vip_extractor.py     # v3.0 VIP信息结构化提取器（搜索式发现: stock_company主营业务全文搜索）
-├── heat_tracker.py      # v3.0 热度量化追踪器（资金流向+信息密度+涨停密度 → 按天热度曲线）
+├── heat_tracker.py      # v3.0 热度量化追踪器（多板块对比: 资金流向60%+涨停密度40%，2周历史数据，不依赖自身积累）
 ├── push_feishu.py        # 飞书推送 - 推送MD文件+重要提醒+金股摘要到飞书群机器人
 ├── config.json           # 持久化配置 - 飞书Webhook等（自动化任务可读取）
 ├── data/                 # 数据目录（v2.0: data_summary.json和qian_sanqiang_results.json纳入git）
