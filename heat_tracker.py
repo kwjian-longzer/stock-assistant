@@ -523,7 +523,7 @@ DEFAULT_SECTORS = [
 ]
 
 
-def generate_heat_report_section(pro=None, stock_basic_list=None, sectors_config=None, days=14):
+def generate_heat_report_section(pro=None, stock_basic_list=None, sectors_config=None, days=28):
     """生成热度对比报告段落（供AI报告引用）
 
     Args:
@@ -563,5 +563,62 @@ if __name__ == "__main__":
     stock_db = load_stock_database(pro)
 
     # 使用默认板块配置
-    chart = generate_heat_report_section(pro, stock_db, DEFAULT_SECTORS, days=14)
+    chart = generate_heat_report_section(pro, stock_db, DEFAULT_SECTORS, days=28)
     print(chart)
+
+
+def export_heat_data_json(output_path=None, pro=None, stock_basic_list=None, sectors_config=None, days=28):
+    """导出热度数据为JSON文件（供HTML报告的ECharts使用）
+
+    Args:
+        output_path: 输出路径（None则输出到 data/heat_data.json）
+        pro: Tushare pro_api
+        stock_basic_list: 股票基础信息
+        sectors_config: 板块配置
+        days: 自然日天数（28天约覆盖20个交易日）
+
+    Returns:
+        dict: 热度数据字典
+    """
+    if pro is None:
+        ts = _ensure_tushare()
+        ts.set_token("8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365")
+        pro = ts.pro_api()
+
+    if stock_basic_list is None:
+        from vip_extractor import load_stock_database
+        stock_basic_list = load_stock_database(pro)
+
+    if sectors_config is None:
+        sectors_config = DEFAULT_SECTORS
+
+    result = compute_sector_heat_comparison(pro, stock_basic_list, sectors_config, days=days)
+
+    # 构建JSON数据（ECharts友好格式）
+    export_data = {
+        "trade_dates": result["trade_dates"],
+        "date_labels": [f"{d[4:6]}-{d[6:8]}" for d in result["trade_dates"]],
+        "sectors": [],
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+
+    for sec in result["sectors"]:
+        export_data["sectors"].append({
+            "name": sec["name"],
+            "heat_series": sec["heat_series"],
+            "capital_series": sec["capital_series"],
+            "limit_series": sec["limit_series"],
+            "current_heat": sec.get("current_heat", 0),
+            "lifecycle": sec.get("lifecycle", {}),
+        })
+
+    if output_path is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_path = os.path.join(script_dir, "data", "heat_data.json")
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(export_data, f, ensure_ascii=False, indent=2)
+
+    print(f"[OK] 热度数据已导出: {output_path}")
+    return export_data
