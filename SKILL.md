@@ -23,7 +23,7 @@ stock-assistant/
 ├── fetch_data.py         # 数据采集 - 从Tushare/新浪/媒体网站获取原始数据 + 钱三强选股
 ├── qian_sanqiang_selector.py  # 钱三强选股公式 - 量化选股引擎（EMA趋势+换手率+资金共振）
 ├── extract_summary.py    # 数据摘要 - 从原始数据提取精炼摘要（AI写报告的唯一数据来源）
-├── validate_report.py    # 报告校验 - v2.0: 10条红线(含热点追踪/龙脉定位/推理链/交叉验证密度)
+├── validate_report.py    # 报告校验 - v2.0: 12条红线(含热点追踪/龙脉定位/推理链/交叉验证/热度曲线/金股汇总表)
 ├── report_quality_evaluator.py  # v2.0质量评分系统 - 10维度×10分=100分
 ├── vip_extractor.py     # v2.0 VIP信息结构化提取器
 ├── push_feishu.py        # 飞书推送 - 推送MD文件+重要提醒+金股摘要到飞书群机器人
@@ -73,7 +73,7 @@ stock-assistant/
          → 必须包含第零章: 财联社信源扫描与信号提取
 
 步骤4:   python validate_report.py --report reports/YYYY-MM-DD_报告类型.md --summary data/data_summary.json
-         → v2.0校验包含10条红线：占位符/指数一致性/涨跌幅/股票代码/最小长度/章节结构(含第零章)/热点生命周期/金股龙脉定位/推理链完整性/交叉验证密度
+         → v2.0校验包含12条红线：占位符/指数一致性/涨跌幅/股票代码/最小长度/章节结构(含第零章)/热点生命周期/金股龙脉定位/推理链完整性/交叉验证密度/时间-热度曲线/金股结构化汇总表
          → 校验失败则必须修复报告后重新校验，直到通过
 
 步骤4.5: python report_quality_evaluator.py --report reports/YYYY-MM-DD_报告类型.md --summary data/data_summary.json

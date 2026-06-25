@@ -576,14 +576,23 @@ def generate_vip_md_from_summary(data_dir, report_date_str):
         return None
 
     chapter_vip = summary.get("chapter_vip", {})
-    if not isinstance(chapter_vip, dict) or not chapter_vip.get("vip_stocks"):
-        print("[SKIP] chapter_vip 无数据，跳过VIP信息表MD生成")
+    if not isinstance(chapter_vip, dict):
+        print("[SKIP] chapter_vip 非字典，跳过VIP信息表MD生成")
         return None
+
+    # v2: 只要文章数>0就生成MD（即使vip_stocks为空，也含文章清单+催化主题）
+    total_articles = chapter_vip.get("total_articles", 0)
+    has_stocks = bool(chapter_vip.get("vip_stocks"))
+    if total_articles == 0 and not has_stocks:
+        print("[SKIP] chapter_vip 无文章无股票，跳过VIP信息表MD生成")
+        return None
+
+    print(f"[VIP] 生成VIP信息表MD: {total_articles} 篇文章, "
+          f"{'有' if has_stocks else '无'}股票匹配")
 
     # 用 vip_extractor 的 MD 生成函数
     try:
         from vip_extractor import generate_vip_md_report as _gen_vip_md
-        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(summary_path)))
         md_path = _gen_vip_md(chapter_vip, report_date_str)
         return md_path
     except ImportError:
@@ -603,19 +612,49 @@ def _generate_vip_md_fallback(vip_table, report_date_str):
     lines = []
     lines.append(f"# VIP研报信息表（{report_date_str}）")
     lines.append("")
-    lines.append(f"> 研报类文章: {vip_table.get('total_articles', 0)} 篇 | "
-                 f"提取股票: {vip_table.get('total_extracted', 0)} 只")
+    total_articles = vip_table.get("total_articles", 0)
+    total_extracted = vip_table.get("total_extracted", 0)
+    themes = vip_table.get("catalyst_themes", [])
+    lines.append(f"> VIP文章: {total_articles} 篇 | "
+                 f"匹配股票: {total_extracted} 只 | "
+                 f"催化主题: {len(themes)} 个")
     lines.append("")
 
+    # 催化主题
+    if themes:
+        lines.append("## 催化主题汇总")
+        lines.append("")
+        lines.append("| 关键词 | 出现次数 |")
+        lines.append("|--------|---------|")
+        for t in themes[:15]:
+            lines.append(f"| {t.get('keyword','')} | {t.get('mentions',0)} |")
+        lines.append("")
+
+    # 文章清单
+    article_list = vip_table.get("article_list", [])
+    if article_list:
+        lines.append("## VIP文章清单")
+        lines.append("")
+        lines.append("| 序号 | 类型 | 催化关键词 | 股票匹配 | 标题 |")
+        lines.append("|------|------|-----------|---------|------|")
+        for i, a in enumerate(article_list, 1):
+            kws = ", ".join(a.get("keywords", [])[:5])
+            matched = ", ".join(a.get("matched_stocks", [])) if a.get("has_stock_match") else "-"
+            lines.append(f"| {i} | {a.get('type','')} | {kws} | {matched} | {a.get('title','')[:40]} |")
+        lines.append("")
+
+    # 股票表
     stocks = vip_table.get("vip_stocks", [])
     if stocks:
-        lines.append("| 序号 | 代码 | 名称 | 板块 | 催化关键词 | 来源研报 |")
-        lines.append("|------|------|------|------|-----------|---------|")
+        lines.append("## VIP研报关联股票")
+        lines.append("")
+        lines.append("| 序号 | 代码 | 名称 | 板块 | 行业 | 催化关键词 | 来源研报 |")
+        lines.append("|------|------|------|------|------|-----------|---------|")
         for i, s in enumerate(stocks, 1):
             keywords = ", ".join(s.get("catalyst_keywords", [])[:5])
             lines.append(
                 f"| {i} | {s.get('stock_code','')} | {s.get('stock_name','')} | "
-                f"{s.get('sector','')} | {keywords} | {s.get('source_article','')[:40]} |"
+                f"{s.get('sector','')} | {s.get('industry','')} | {keywords} | {s.get('source_article','')[:40]} |"
             )
         lines.append("")
 

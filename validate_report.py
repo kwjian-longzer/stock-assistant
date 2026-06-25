@@ -485,6 +485,57 @@ def check_cross_validation_density(report_text: str) -> tuple[bool, list[str]]:
     return True, []
 
 
+def check_heat_curve(report_text: str) -> tuple[bool, list[str]]:
+    """红线11（v2.0新增）：检查时间-热度变化曲线
+
+    报告中至少出现1处文本可视化的热度曲线，
+    标志: 含热度曲线符号(▂▃▄▅▆▇█) 或 "时间-热度"/"热度"相关表述
+    """
+    errors = []
+    # 检查热度曲线符号
+    curve_chars = ['▂', '▃', '▄', '▅', '▆', '▇', '█']
+    has_curve = any(c in report_text for c in curve_chars)
+    # 检查热度曲线文字描述
+    has_heat_text = '热度' in report_text and ('曲线' in report_text or '时段' in report_text)
+
+    if not has_curve and not has_heat_text:
+        errors.append(
+            "缺少时间-热度变化曲线：核心热点需用文本曲线展示当日热度变化"
+            "（使用 ▂▃▄▅▆▇█ 符号 + 时段标注）"
+        )
+        return False, errors
+
+    return True, []
+
+
+def check_gold_stock_table(report_text: str) -> tuple[bool, list[str]]:
+    """红线12（v2.0新增）：检查金股结构化汇总表
+
+    金股部分必须包含结构化汇总表格：
+    - 有龙脉关键词（潜龙在渊/见龙在田/飞龙在天/龙脉）
+    - 且出现在表格行（以|开头，含股票代码或名称）
+    """
+    errors = []
+    dragon_kw = ['龙脉', '潜龙在渊', '见龙在田', '飞龙在天']
+    stock_code_pattern = re.compile(r'\d{6}')
+
+    # 查找含龙脉关键词的表格行（以|开头）
+    dragon_table_rows = []
+    for line in report_text.split('\n'):
+        line = line.strip()
+        if line.startswith('|') and any(kw in line for kw in dragon_kw):
+            dragon_table_rows.append(line)
+
+    if not dragon_table_rows:
+        errors.append(
+            "缺少金股结构化汇总表：金股需以表格形式呈现"
+            "（表格行含代码/名称/龙脉/验证维度/买入区间等列）"
+        )
+        return False, errors
+
+    return True, []
+
+
 def check_chapter_structure(report_text: str) -> tuple[bool, list[str]]:
     """红线6：检查章节结构完整性（v2.0: 含第零章共七组）"""
     errors = []
@@ -576,6 +627,14 @@ def validate(report_path: str, summary_path: str) -> dict:
     cross_ok, cross_errors = check_cross_validation_density(report_text)
     errors.extend(cross_errors)
 
+    # 红线11（v2.0新增）：时间-热度变化曲线
+    heat_ok, heat_errors = check_heat_curve(report_text)
+    errors.extend(heat_errors)
+
+    # 红线12（v2.0新增）：金股结构化汇总表
+    gold_table_ok, gold_table_errors = check_gold_stock_table(report_text)
+    errors.extend(gold_table_errors)
+
     # 警告
     warnings.extend(check_warnings(report_text))
 
@@ -590,6 +649,8 @@ def validate(report_path: str, summary_path: str) -> dict:
         'dragon_vein_labeled': dragon_ok,
         'reasoning_chain_complete': chain_ok,
         'cross_validation_density': cross_ok,
+        'heat_curve': heat_ok,
+        'gold_stock_table': gold_table_ok,
     }
 
     valid = len(errors) == 0

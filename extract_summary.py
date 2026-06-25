@@ -1230,7 +1230,8 @@ def extract_chapter_vip(data):
 
     v2.0: 从 fetch_data.py 的VIP提取结果中读取结构化信息表。
     如果raw_data中已包含vip_info（fetch_data.py调用vip_extractor生成），
-    直接使用；否则尝试从VIP文章中现场提取。
+    直接使用（即使vip_stocks为空，也包含article_list和catalyst_themes）；
+    否则尝试从VIP文章中现场提取。
 
     Args:
         data: raw_data 字典
@@ -1238,11 +1239,13 @@ def extract_chapter_vip(data):
     Returns:
         dict: {"chapter_vip": vip_info_table}
     """
-    # 1. 检查 raw_data 中是否已有 vip_info
+    # 1. 检查 raw_data 中是否已有 vip_info（v2格式，含article_list）
     vip_info = data.get("vip_info", None)
 
-    if vip_info and isinstance(vip_info, dict) and vip_info.get("vip_stocks"):
-        print(f"  [VIP] 从raw_data读取VIP信息表: {vip_info.get('total_extracted', 0)} 只股票")
+    if vip_info and isinstance(vip_info, dict) and vip_info.get("total_articles", 0) > 0:
+        stocks_count = len(vip_info.get("vip_stocks", []))
+        print(f"  [VIP] 从raw_data读取VIP信息表: {stocks_count} 只股票, "
+              f"{vip_info.get('total_articles', 0)} 篇文章")
         return {"chapter_vip": vip_info}
 
     # 2. 如果没有预提取的VIP信息表，从cls_pages的VIP文章中现场提取
@@ -1264,16 +1267,8 @@ def extract_chapter_vip(data):
                     pass
 
                 vip_table = extract_vip_info(vip_articles, pro=pro)
-                if vip_table.get("vip_stocks"):
-                    return {"chapter_vip": vip_table}
-                else:
-                    return {"chapter_vip": {
-                        "vip_stocks": [],
-                        "total_articles": vip_table.get("total_articles", 0),
-                        "total_extracted": 0,
-                        "catalyst_themes": vip_table.get("catalyst_themes", []),
-                        "note": "VIP文章已采集但未匹配到具体股票，催化主题供AI分析参考",
-                    }}
+                # v2: 无论是否匹配到股票，都返回完整结构（含article_list）
+                return {"chapter_vip": vip_table}
             except Exception as e:
                 print(f"  [WARN] VIP信息提取失败: {e}")
                 return {"chapter_vip": "数据暂缺"}
