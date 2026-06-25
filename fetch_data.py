@@ -1273,73 +1273,70 @@ def fetch_cls_pages_via_api(data_quality):
         result['深度头条'] = {'error': 'API采集失败'}
         record_quality(data_quality, "财联社-深度头条", "FAILED", "cls_api", 0, "API返回空")
 
-    # === 2. VIP文章 ===
-    print("  [CLS API] 采集VIP文章...")
+    # === 2. VIP文章（分页采集，目标50+篇）===
+    print("  [CLS API] 采集VIP文章（分页采集）...")
     vip_data = _cls_api_get('/featured/v1/home/assembled')
     vip_articles = []
+    seen_ids = set()  # 用于去重
+
+    def _add_vip_article(art, source_tag=''):
+        """添加VIP文章到列表，保留related_stock字段"""
+        art_id = art.get('id', art.get('title', ''))
+        if art_id and art_id in seen_ids:
+            return
+        seen_ids.add(art_id)
+        vip_articles.append({
+            'title': art.get('title', ''),
+            'brief': art.get('brief', '')[:300] if art.get('brief') else '',
+            'type': art.get('type_name', ''),
+            'reading_num': art.get('reading_num', 0),
+            'unlock': art.get('unlock', False),
+            'label': art.get('label', ''),
+            'related_stock': art.get('related_stock', ''),
+            'ctime': art.get('ctime', 0),
+            'source': source_tag,
+        })
+
     if vip_data and isinstance(vip_data, dict):
-        # recommend_list: 推荐文章
+        # recommend_list: 推荐文章（含related_stock）
         for art in vip_data.get('recommend_list', []):
-            vip_articles.append({
-                'title': art.get('title', ''),
-                'brief': art.get('brief', '')[:300],
-                'type': art.get('type_name', ''),
-                'reading_num': art.get('reading_num', 0),
-                'unlock': art.get('unlock', False),
-                'label': art.get('label', ''),
-            })
-        # free_top_v2: 免费置顶（含相关股票）
+            _add_vip_article(art, 'recommend_list')
+        # free_top_v2: 免费置顶
         for art in vip_data.get('free_top_v2', []):
-            vip_articles.append({
-                'title': art.get('title', ''),
-                'brief': art.get('brief', '')[:300],
-                'type': art.get('type_name', ''),
-                'related_stock': art.get('related_stock', ''),
-                'label': art.get('label', ''),
-            })
+            _add_vip_article(art, 'free_top_v2')
         # yellow_article: 黄V文章
         for art in vip_data.get('yellow_article', []):
-            vip_articles.append({
-                'title': art.get('title', ''),
-                'brief': '',
-                'type': '黄V',
-                'article_id': art.get('article_id', ''),
-            })
+            _add_vip_article(art, 'yellow_article')
 
-    # VIP推荐文章（补充）
+    # VIP推荐文章分页采集（Page 2-5，每页15篇）
     import time as _time
     last_time = str(int(_time.time()))
-    recommend_data = _cls_api_get('/featured/v2/home/recommend/article',
-                                   {'last_time': last_time, 'refresh_Type': '1'})
-    if recommend_data and isinstance(recommend_data, list):
-        for art in recommend_data:
-            vip_articles.append({
-                'title': art.get('title', ''),
-                'brief': art.get('brief', '')[:300],
-                'type': art.get('type_name', ''),
-                'reading_num': art.get('reading_num', 0),
-                'unlock': art.get('unlock', False),
-            })
+    for page in range(2, 6):
+        recommend_data = _cls_api_get('/featured/v2/home/recommend/article',
+                                       {'last_time': last_time, 'refresh_Type': '1'})
+        if recommend_data and isinstance(recommend_data, list):
+            if len(recommend_data) == 0:
+                break
+            for art in recommend_data:
+                _add_vip_article(art, f'recommend_p{page}')
+            # 下一页用本页最旧文章的ctime
+            oldest_ctime = min(a.get('ctime', _time.time()) for a in recommend_data)
+            last_time = str(int(oldest_ctime))
+        else:
+            break
 
     if vip_articles:
-        # 提取热门股票
-        hot_stocks = []
-        for art in vip_articles:
-            related = art.get('related_stock', '')
-            if related:
-                for s in related.split(','):
-                    s = s.strip()
-                    if s:
-                        hot_stocks.append(s)
+        # related_stock 统计
+        has_stock_info = sum(1 for a in vip_articles if a.get('related_stock'))
 
         result['VIP文章'] = {
-            'articles': vip_articles[:30],
+            'articles': vip_articles[:50],
             'article_count': len(vip_articles),
-            'hot_stocks': list(set(hot_stocks))[:20],
-            'source': 'cls_api',
+            'articles_with_stock': has_stock_info,
+            'source': 'cls_api_paginated',
         }
         record_quality(data_quality, "财联社-VIP文章", "OK", "cls_api", len(vip_articles))
-        print(f"    VIP文章: {len(vip_articles)} 篇")
+        print(f"    VIP文章: {len(vip_articles)} 篇 (去重后), 其中 {has_stock_info} 篇含板块信息, 截取前50篇")
     else:
         result['VIP文章'] = {'error': 'API采集失败'}
         record_quality(data_quality, "财联社-VIP文章", "FAILED", "cls_api", 0, "API返回空")

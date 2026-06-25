@@ -25,7 +25,8 @@ stock-assistant/
 ├── extract_summary.py    # 数据摘要 - 从原始数据提取精炼摘要（AI写报告的唯一数据来源）
 ├── validate_report.py    # 报告校验 - v2.0: 12条红线(含热点追踪/龙脉定位/推理链/交叉验证/热度曲线/金股汇总表)
 ├── report_quality_evaluator.py  # v2.0质量评分系统 - 10维度×10分=100分
-├── vip_extractor.py     # v2.0 VIP信息结构化提取器
+├── vip_extractor.py     # v3.0 VIP信息结构化提取器（搜索式发现: stock_company主营业务全文搜索）
+├── heat_tracker.py      # v3.0 热度量化追踪器（资金流向+信息密度+涨停密度 → 按天热度曲线）
 ├── push_feishu.py        # 飞书推送 - 推送MD文件+重要提醒+金股摘要到飞书群机器人
 ├── config.json           # 持久化配置 - 飞书Webhook等（自动化任务可读取）
 ├── data/                 # 数据目录（v2.0: data_summary.json和qian_sanqiang_results.json纳入git）
@@ -59,6 +60,7 @@ stock-assistant/
          → 包含财联社电报（API）+ 财联社页面（读取cls_pages.json）
          → 自动运行钱三强选股，生成 data/qian_sanqiang_results.json
          → v2.0: 电报采集后自动归档到 data/cls_telegraph_archive/YYYY-MM-DD.json（增量去重）
+         → v3.0: VIP文章分页采集（5页），去重后50+篇，保留related_stock板块约束字段
          → v2.0: weekly模式不采集实时数据，读取本周报告+电报归档+数据摘要，生成raw_data_weekly.json
 
 步骤2:   python extract_summary.py

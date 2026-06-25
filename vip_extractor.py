@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-VIP信息结构化提取器 v2
+VIP信息结构化提取器 v3
 
-从财联社VIP文章中提取催化主题和关联股票，生成结构化VIP信息表。
-
-核心改进:
-  1. 处理全部VIP文章（电报解读/风口研报/盘中宝等8类），不再只筛"风口研报"
-  2. 关键词提取基于行业词典匹配，不再按标点切分产生句子片段
-  3. 不依赖related_stock字段（真实API不返回此字段）
-  4. 即使0匹配也生成MD文件（含文章清单+催化主题）
-
-工作流程:
-  1. 加载Tushare stock_basic，构建 行业→股票 索引
-  2. 遍历全部VIP文章，用行业词典+概念词典从标题/摘要提取催化关键词
-  3. 按关键词匹配Tushare股票（行业匹配+名称匹配）
-  4. 输出结构化VIP信息表 + MD文件
+核心改进（v3）:
+  1. 搜索式股票发现：用每篇文章的标题/简介提取业务关键词，
+     在Tushare stock_company主营业务中全文搜索，发现最匹配的上市公司
+  2. 利用CLS API related_stock字段的板块+数量约束
+  3. 三层评分：板块匹配 + 主营业务包含搜索词 + 名称匹配
+  4. 处理全部文章（分页采集50+篇）
+  5. 板块维度标注：行业/概念/热点/事件四维
+  6. 即使0匹配也生成MD文件（含文章清单+催化主题）
 
 用法:
   from vip_extractor import extract_vip_info
@@ -27,15 +22,6 @@ import os
 import re
 import sys
 from collections import Counter, defaultdict
-
-# 板块匹配规则: 关键词 → Tushare 代码前缀
-SECTOR_PREFIX = {
-    "科创板": "688",
-    "创业板": "300",
-    "沪市主板": "60",
-    "深市主板": "00",
-    "北交所": "8",
-}
 
 # A股核心概念/赛道关键词词典（用于从文章文本中提取催化主题）
 CONCEPT_KEYWORDS = [
@@ -68,8 +54,8 @@ CONCEPT_KEYWORDS = [
     # 金融科技
     "数字货币", "金融科技",
     # 材料
-    "芳纶", "粉体材料", "铝材", "铜材", "锡粉", "镍粉",
-    "氮化铝", "氧化铜", "电子浆料",
+    "芳纶", "粉体", "粉体材料", "铝材", "铜材", "锡粉", "镍粉",
+    "氮化铝", "氧化铜", "电子浆料", "铜基粉体",
     # 电力
     "电力", "特高压", "电网", "虚拟电厂",
     # 汽车
@@ -89,6 +75,15 @@ STOP_WORDS = {
     "这家", "另有", "公司相关", "相关产品",
 }
 
+# 板块映射
+MARKET_PREFIX = {
+    "科创板": "688",
+    "创业板": "300",
+    "主板": "",  # 沪深主板不限制前缀
+    "沪市主板": "60",
+    "深市主板": "00",
+}
+
 
 def _ensure_tushare():
     """确保 tushare 已安装"""
@@ -105,14 +100,15 @@ def _ensure_tushare():
         return ts
 
 
-def load_stock_basic(pro=None):
-    """加载 Tushare 全量股票基础信息
+def load_stock_database(pro=None):
+    """加载全量股票数据库（stock_basic + stock_company合并）
 
     Args:
-        pro: Tushare pro_api 实例，None则自动初始化
+        pro: Tushare pro_api 实例
 
     Returns:
-        list: 股票基础信息列表，每个元素含 ts_code, name, industry, symbol 等
+        list: 合并后的股票信息列表，每个元素含:
+            ts_code, symbol, name, industry, main_business, business_scope
     """
     if pro is None:
         ts = _ensure_tushare()
@@ -121,54 +117,33 @@ def load_stock_basic(pro=None):
         pro = ts.pro_api()
 
     try:
-        df = pro.stock_basic(exchange='', list_status='L',
-                             fields='ts_code,symbol,name,area,industry,list_date')
-        stocks = df.to_dict('records')
-        print(f"[OK] 加载股票基础信息: {len(stocks)} 只")
+        df_basic = pro.stock_basic(exchange='', list_status='L',
+                                   fields='ts_code,symbol,name,industry,area,list_date')
+        df_company = pro.stock_company(fields='ts_code,main_business,business_scope')
+        df_merged = df_basic.merge(df_company, on='ts_code', how='left')
+
+        stocks = df_merged.to_dict('records')
+        print(f"[OK] 加载股票数据库: {len(stocks)} 只 (含主营业务描述)")
         return stocks
     except Exception as e:
-        print(f"[WARN] 加载股票基础信息失败: {e}")
+        print(f"[WARN] 加载股票数据库失败: {e}")
         return []
 
 
-def build_industry_index(stock_basic_list):
-    """构建 行业→股票列表 索引
+def extract_search_terms(title, brief=""):
+    """从文章标题和简介中提取搜索词
 
-    Args:
-        stock_basic_list: Tushare 股票基础信息列表
-
-    Returns:
-        dict: {行业名: [股票信息, ...]}
-        set: 全部唯一行业名集合
-    """
-    industry_index = defaultdict(list)
-    all_industries = set()
-
-    for stock in stock_basic_list:
-        industry = stock.get("industry", "")
-        if industry:
-            industry_index[industry].append(stock)
-            all_industries.add(industry)
-
-    return dict(industry_index), all_industries
-
-
-def extract_catalyst_keywords(title, brief="", known_industries=None):
-    """从文章标题和摘要中提取催化关键词
-
-    改进版: 使用行业词典+概念词典进行已知关键词匹配，
-    而非按标点切分（避免产生句子片段）。
+    使用概念词典匹配 + 标点切分短词过滤，
+    提取用于在主营业务中搜索的关键词。
 
     Args:
         title: 文章标题
         brief: 文章摘要
-        known_industries: 已知的Tushare行业名集合（用于匹配）
 
     Returns:
-        list: 催化关键词列表（去重，保持出现顺序）
+        list: 搜索关键词列表
     """
     text = f"{title} {brief}"
-
     keywords = []
 
     # 1. 匹配概念关键词词典
@@ -176,18 +151,10 @@ def extract_catalyst_keywords(title, brief="", known_industries=None):
         if kw in text:
             keywords.append(kw)
 
-    # 2. 匹配Tushare已知行业名
-    if known_industries:
-        for ind in known_industries:
-            if ind and len(ind) >= 2 and ind in text:
-                if ind not in keywords:
-                    keywords.append(ind)
-
-    # 3. 按标点切分后提取短关键词（2-6字名词，过滤句子片段）
-    parts = re.split(r'[、,，；;。\s！!？?]', text)
+    # 2. 按标点切分提取短词（2-6字，过滤句子片段）
+    parts = re.split(r'[、,，；;。\s！!？?【】\[\]]', text)
     for part in parts:
         part = part.strip()
-        # 只保留2-6字的短词（长的大概率是句子片段）
         if not (2 <= len(part) <= 6):
             continue
         if re.match(r'^[\d.]+$', part):
@@ -202,7 +169,7 @@ def extract_catalyst_keywords(title, brief="", known_industries=None):
         if part not in keywords:
             keywords.append(part)
 
-    # 去重保持顺序，限制数量
+    # 去重保持顺序
     seen = set()
     unique = []
     for kw in keywords:
@@ -210,119 +177,179 @@ def extract_catalyst_keywords(title, brief="", known_industries=None):
             seen.add(kw)
             unique.append(kw)
 
-    return unique[:12]
+    return unique[:10]
 
 
-def match_stocks_by_keywords(keywords, stock_basic_list, industry_index=None, max_matches=5):
-    """用关键词匹配 Tushare 股票
+def parse_related_stock(related_stock):
+    """解析CLS API的related_stock字段
 
-    匹配策略（三级）:
-      1. 行业完全匹配: 关键词 == 股票行业（高分）
-      2. 股票名称包含关键词（中分）
-      3. 关键词包含股票名称（中低分）
-
-    Args:
-        keywords: 催化关键词列表
-        stock_basic_list: 全量股票列表（用于名称匹配）
-        industry_index: 行业→股票索引（加速行业匹配）
-        max_matches: 最多返回匹配数量
+    格式: [{"market": "科创板", "count": 1}, {"market": "主板", "count": 2}]
+    或: "相关股票：科创板1只"
 
     Returns:
-        list: 匹配的股票列表，按匹配分数排序
+        list: [{"market": "科创板", "count": 1}, ...]
     """
-    if not keywords:
+    if not related_stock:
         return []
 
-    matches = []
-    matched_codes = set()
+    # 格式1: 列表（CLS API原生格式）
+    if isinstance(related_stock, list):
+        result = []
+        for item in related_stock:
+            if isinstance(item, dict):
+                market = item.get("market", "")
+                count = item.get("count", 0)
+                if market:
+                    result.append({"market": market, "count": count})
+        return result
 
-    # 1. 行业匹配: 关键词直接等于行业名
-    if industry_index:
-        for kw in keywords:
-            if kw in industry_index:
-                for stock in industry_index[kw]:
-                    ts_code = stock.get("ts_code", "")
-                    if ts_code in matched_codes:
-                        continue
-                    matched_codes.add(ts_code)
-                    # 统计该股票匹配的关键词数
-                    kw_count = sum(1 for k in keywords if k == stock.get("industry", ""))
-                    matches.append({
-                        "ts_code": ts_code,
-                        "name": stock.get("name", ""),
-                        "industry": stock.get("industry", ""),
-                        "symbol": stock.get("symbol", ""),
-                        "match_score": 5 + kw_count,
-                        "matched_keywords": [kw],
-                        "match_type": "industry_exact",
-                    })
+    # 格式2: 字符串（旧格式兼容）
+    if isinstance(related_stock, str):
+        s = related_stock.replace("相关股票：", "").replace("相关股票:", "").strip()
+        pattern = r'([\u4e00-\u9fa5]+?)(\d+)只'
+        matches = re.findall(pattern, s)
+        result = []
+        for market_name, count in matches:
+            market = _normalize_market(market_name)
+            result.append({"market": market, "count": int(count)})
+        return result
 
-    # 2. 名称匹配: 遍历全量股票做名称包含
-    for stock in stock_basic_list:
-        ts_code = stock.get("ts_code", "")
-        name = stock.get("name", "")
-        industry = stock.get("industry", "")
-
-        if ts_code in matched_codes:
-            continue
-        if not name or len(name) < 2:
-            continue
-
-        score = 0
-        matched_kws = []
-
-        for kw in keywords:
-            kw_clean = kw.strip()
-            if not kw_clean or len(kw_clean) < 2:
-                continue
-            # 股票名称包含关键词
-            if kw_clean in name:
-                score += 4
-                matched_kws.append(kw_clean)
-            # 关键词包含股票名称
-            elif len(name) >= 2 and name in kw_clean:
-                score += 3
-                matched_kws.append(kw_clean)
-
-        if score > 0:
-            matched_codes.add(ts_code)
-            matches.append({
-                "ts_code": ts_code,
-                "name": name,
-                "industry": industry,
-                "symbol": stock.get("symbol", ""),
-                "match_score": score,
-                "matched_keywords": matched_kws,
-                "match_type": "name_match",
-            })
-
-    # 按匹配分数排序
-    matches.sort(key=lambda x: x["match_score"], reverse=True)
-    return matches[:max_matches]
+    return []
 
 
-def extract_vip_info(vip_articles, stock_basic_list=None, pro=None):
-    """从VIP文章列表中提取结构化信息表
+def _normalize_market(name):
+    """标准化板块名称"""
+    if "科创" in name:
+        return "科创板"
+    if "创业" in name:
+        return "创业板"
+    if "主板" in name or name in ("沪", "深", "沪深"):
+        return "主板"
+    if "北交" in name:
+        return "北交所"
+    return name
 
-    主入口函数:
-      1. 加载Tushare股票基础信息 + 构建行业索引
-      2. 遍历全部VIP文章（不筛选类型）
-      3. 用行业词典+概念词典提取催化关键词
-      4. 按关键词匹配具体股票
-      5. 输出结构化信息表（即使0匹配也返回有效结构）
+
+def discover_stocks_by_article(title, brief, related_stock, stock_database, max_results=3):
+    """用文章内容搜索发现最匹配的上市公司
+
+    三层搜索发现：
+    1. 提取搜索词（业务关键词）
+    2. 在stock_company.main_business中全文搜索
+    3. 利用related_stock的板块+数量约束过滤
+    4. 综合评分排序
 
     Args:
-        vip_articles: VIP文章列表（来自CLS API）
-        stock_basic_list: 预加载的股票基础信息（可选）
+        title: 文章标题
+        brief: 文章摘要
+        related_stock: CLS API的related_stock字段
+        stock_database: load_stock_database()返回的全量股票列表
+        max_results: 最多返回结果数
+
+    Returns:
+        list: 匹配的股票列表
+    """
+    # Step 1: 提取搜索词
+    search_terms = extract_search_terms(title, brief)
+    if not search_terms:
+        return []
+
+    # Step 2: 解析板块约束
+    market_constraints = parse_related_stock(related_stock)
+    # 收集所有要求的前缀
+    required_prefixes = set()
+    total_expected = 0
+    for mc in market_constraints:
+        market = mc["market"]
+        total_expected += mc["count"]
+        prefix = MARKET_PREFIX.get(market, "")
+        if prefix:
+            required_prefixes.add(prefix)
+        # 主板包含沪市和深市
+        if market == "主板":
+            required_prefixes.add("60")
+            required_prefixes.add("00")
+
+    # Step 3: 在主营业务中全文搜索
+    candidates = []
+    for stock in stock_database:
+        ts_code = stock.get("ts_code", "")
+        name = stock.get("name", "")
+        main_biz = stock.get("main_business", "") or ""
+        biz_scope = stock.get("business_scope", "") or ""
+        combined_biz = f"{main_biz} {biz_scope}"
+
+        if not main_biz:
+            continue
+
+        # 板块过滤：如果有板块约束，只搜索该板块的股票
+        if required_prefixes:
+            symbol = stock.get("symbol", ts_code.split(".")[0])
+            if not any(symbol.startswith(p) for p in required_prefixes):
+                continue
+
+        # 计算匹配分数
+        score = 0
+        matched_terms = []
+
+        for term in search_terms:
+            # 主营业务包含搜索词（高分）
+            if term in main_biz:
+                score += 5
+                matched_terms.append(term)
+            # 经营范围包含搜索词（中分）
+            elif term in biz_scope:
+                score += 3
+                matched_terms.append(term)
+            # 股票名称包含搜索词（中分）
+            elif term in name:
+                score += 3
+                matched_terms.append(term)
+            # 名称包含搜索词的前2字（低分模糊匹配）
+            elif len(term) >= 2 and term[:2] in name:
+                score += 1
+                matched_terms.append(term)
+
+        if score > 0:
+            candidates.append({
+                "ts_code": ts_code,
+                "name": name,
+                "industry": stock.get("industry", ""),
+                "symbol": stock.get("symbol", ""),
+                "main_business": main_biz[:100],
+                "match_score": score,
+                "matched_terms": matched_terms,
+                "market_constraint_applied": bool(required_prefixes),
+            })
+
+    # Step 4: 综合评分排序
+    candidates.sort(key=lambda x: x["match_score"], reverse=True)
+
+    # 如果有板块约束且有count限制，尝试只取count个
+    if market_constraints and total_expected > 0 and len(candidates) > total_expected:
+        # 取前count个（但保留更多以防数量不足）
+        candidates = candidates[:max(total_expected * 2, max_results)]
+
+    return candidates[:max_results]
+
+
+def extract_vip_info(vip_articles, stock_database=None, pro=None):
+    """从VIP文章列表中提取结构化信息表（v3搜索式发现）
+
+    主入口函数:
+      1. 加载Tushare股票数据库（stock_basic + stock_company合并）
+      2. 遍历全部VIP文章
+      3. 用文章标题/简介提取搜索词
+      4. 在主营业务中全文搜索发现匹配股票
+      5. 利用related_stock的板块约束过滤
+
+    Args:
+        vip_articles: VIP文章列表（来自CLS API分页采集）
+        stock_database: 预加载的股票数据库（可选）
         pro: Tushare pro_api 实例（可选）
 
     Returns:
         dict: VIP信息表
-            - vip_stocks: 结构化股票列表
-            - total_articles: 处理的文章总数
-            - total_extracted: 提取出的股票总数
-            - catalyst_themes: 催化主题汇总（关键词+出现次数）
-            - article_list: 全部文章的结构化摘要
     """
     if not vip_articles:
         return {
@@ -334,17 +361,14 @@ def extract_vip_info(vip_articles, stock_basic_list=None, pro=None):
             "note": "无VIP文章数据",
         }
 
-    # 加载股票基础信息
-    if stock_basic_list is None:
-        stock_basic_list = load_stock_basic(pro)
-
-    # 构建行业索引
-    industry_index, all_industries = build_industry_index(stock_basic_list)
-    print(f"[INFO] 构建行业索引: {len(all_industries)} 个行业")
+    # 加载股票数据库
+    if stock_database is None:
+        stock_database = load_stock_database(pro)
 
     vip_stocks = []
     all_keywords = []
     article_list = []
+    sector_stats = defaultdict(lambda: {"articles": 0, "stocks": set()})
 
     for art in vip_articles:
         title = art.get("title", "")
@@ -352,30 +376,36 @@ def extract_vip_info(vip_articles, stock_basic_list=None, pro=None):
         art_type = art.get("type", "") or art.get("column", "")
         reading_num = art.get("reading_num", 0)
         art_time = art.get("time", "")
+        related_stock = art.get("related_stock", "")
 
-        # 提取催化关键词
-        keywords = extract_catalyst_keywords(title, brief, all_industries)
+        # 提取搜索词（同时作为催化关键词）
+        keywords = extract_search_terms(title, brief)
         if keywords:
             all_keywords.extend(keywords)
 
+        # 解析板块约束
+        market_constraints = parse_related_stock(related_stock)
+        constraint_str = ""
+        if market_constraints:
+            constraint_str = ", ".join(f"{mc['market']}{mc['count']}只" for mc in market_constraints)
+
+        # 搜索发现匹配股票
+        matched = discover_stocks_by_article(
+            title, brief, related_stock, stock_database, max_results=3
+        )
+
         # 记录文章结构化摘要
-        article_list.append({
+        article_entry = {
             "title": title[:120],
             "type": art_type,
             "reading_num": reading_num,
             "keywords": keywords,
-            "has_stock_match": False,
-        })
-
-        # 匹配具体股票
-        matched = match_stocks_by_keywords(
-            keywords, stock_basic_list, industry_index, max_matches=3
-        )
+            "related_stock": constraint_str,
+            "has_stock_match": bool(matched),
+        }
 
         if matched:
-            # 更新文章的匹配状态
-            article_list[-1]["has_stock_match"] = True
-            article_list[-1]["matched_stocks"] = [m["name"] for m in matched]
+            article_entry["matched_stocks"] = [m["name"] for m in matched]
 
             for m in matched:
                 vip_stocks.append({
@@ -383,19 +413,30 @@ def extract_vip_info(vip_articles, stock_basic_list=None, pro=None):
                     "stock_code": m["ts_code"],
                     "sector": _get_sector_by_code(m["ts_code"]),
                     "industry": m["industry"],
+                    "main_business": m["main_business"],
                     "catalyst_keywords": keywords,
-                    "matched_by": m["match_type"],
+                    "matched_terms": m["matched_terms"],
+                    "matched_by": "business_search" + ("+market_filter" if m.get("market_constraint_applied") else ""),
+                    "match_score": m["match_score"],
                     "source_article": title[:100],
                     "article_type": art_type,
                     "article_time": art_time,
                     "reading_num": reading_num,
                 })
 
-    # 去重（同一股票可能来自多篇文章，保留匹配分最高的）
+        # 板块维度统计
+        for mc in market_constraints:
+            sector_stats[mc["market"]]["articles"] += 1
+        for m in matched:
+            sector_stats[m["industry"]]["stocks"].add(m["name"])
+
+        article_list.append(article_entry)
+
+    # 去重（同一股票取匹配分最高的）
     best_by_code = {}
     for s in vip_stocks:
         code = s.get("stock_code", "")
-        if code not in best_by_code or len(s.get("catalyst_keywords", [])) > len(best_by_code[code].get("catalyst_keywords", [])):
+        if code not in best_by_code or s.get("match_score", 0) > best_by_code[code].get("match_score", 0):
             best_by_code[code] = s
 
     unique_stocks = list(best_by_code.values())
@@ -404,6 +445,16 @@ def extract_vip_info(vip_articles, stock_basic_list=None, pro=None):
     theme_counter = Counter(all_keywords)
     top_themes = [{"keyword": k, "mentions": c}
                   for k, c in theme_counter.most_common(20)]
+
+    # 板块维度汇总
+    sector_dimension = []
+    for sector_name, stats in sorted(sector_stats.items(), key=lambda x: x[1]["articles"], reverse=True):
+        sector_dimension.append({
+            "name": sector_name,
+            "article_count": stats["articles"],
+            "stock_count": len(stats["stocks"]),
+            "stocks": list(stats["stocks"])[:5],
+        })
 
     matched_count = sum(1 for a in article_list if a.get("has_stock_match"))
 
@@ -414,12 +465,13 @@ def extract_vip_info(vip_articles, stock_basic_list=None, pro=None):
         "total_matched_articles": matched_count,
         "catalyst_themes": top_themes,
         "article_list": article_list,
-        "source": "vip_extractor_v2",
+        "sector_dimension": sector_dimension,
+        "source": "vip_extractor_v3_search",
     }
 
-    print(f"[OK] VIP信息提取完成: {len(unique_stocks)} 只股票, "
+    print(f"[OK] VIP信息提取完成(v3搜索式): {len(unique_stocks)} 只股票, "
           f"{matched_count}/{len(vip_articles)} 篇文章匹配到股票, "
-          f"{len(top_themes)} 个催化主题")
+          f"{len(top_themes)} 个催化主题, {len(sector_dimension)} 个板块维度")
     return result
 
 
@@ -442,14 +494,7 @@ def _get_sector_by_code(ts_code):
 def generate_vip_md_report(vip_table, report_date_str):
     """生成VIP信息表的MD文件
 
-    v2: 即使vip_stocks为空也生成MD文件（含文章清单+催化主题）
-
-    Args:
-        vip_table: extract_vip_info 返回的VIP信息表
-        report_date_str: 报告日期，如 "2026-06-25"
-
-    Returns:
-        str: MD文件路径（始终生成）
+    v3: 增加板块维度展示 + 主营业务搜索结果
     """
     if not vip_table:
         print("[SKIP] 无VIP信息表数据")
@@ -467,7 +512,7 @@ def generate_vip_md_report(vip_table, report_date_str):
     matched_articles = vip_table.get("total_matched_articles", 0)
     themes = vip_table.get("catalyst_themes", [])
     lines.append(f"> VIP文章: {total_articles} 篇 | "
-                 f"匹配股票: {total_extracted} 只 | "
+                 f"搜索发现股票: {total_extracted} 只 | "
                  f"有股票匹配的文章: {matched_articles} 篇 | "
                  f"催化主题: {len(themes)} 个")
     lines.append("")
@@ -482,42 +527,56 @@ def generate_vip_md_report(vip_table, report_date_str):
             lines.append(f"| {i} | {t['keyword']} | {t['mentions']} |")
         lines.append("")
 
+    # 板块维度
+    sector_dim = vip_table.get("sector_dimension", [])
+    if sector_dim:
+        lines.append("## 板块维度统计")
+        lines.append("")
+        lines.append("| 板块/行业 | 涉及文章数 | 匹配股票数 | 代表股票 |")
+        lines.append("|----------|-----------|-----------|---------|")
+        for s in sector_dim[:10]:
+            stocks = ", ".join(s.get("stocks", [])[:3])
+            lines.append(f"| {s['name']} | {s['article_count']} | {s['stock_count']} | {stocks} |")
+        lines.append("")
+
     # VIP文章结构化清单
     article_list = vip_table.get("article_list", [])
     if article_list:
         lines.append("## VIP文章结构化清单")
         lines.append("")
-        lines.append("| 序号 | 类型 | 阅读量 | 催化关键词 | 股票匹配 | 文章标题 |")
-        lines.append("|------|------|--------|-----------|---------|---------|")
+        lines.append("| 序号 | 类型 | 阅读量 | 板块约束 | 催化关键词 | 股票匹配 | 文章标题 |")
+        lines.append("|------|------|--------|---------|-----------|---------|---------|")
         for i, a in enumerate(article_list, 1):
             kws = ", ".join(a.get("keywords", [])[:5])
+            constraint = a.get("related_stock", "-")
             matched = ", ".join(a.get("matched_stocks", [])) if a.get("has_stock_match") else "-"
-            title = a.get("title", "")[:60]
+            title = a.get("title", "")[:50]
             lines.append(
                 f"| {i} | {a.get('type','')} | {a.get('reading_num',0)} | "
-                f"{kws} | {matched} | {title} |"
+                f"{constraint} | {kws} | {matched} | {title} |"
             )
         lines.append("")
 
-    # VIP股票信息表
+    # VIP股票信息表（含主营业务匹配）
     stocks = vip_table.get("vip_stocks", [])
     if stocks:
-        lines.append("## VIP研报关联股票")
+        lines.append("## VIP研报搜索发现股票")
         lines.append("")
-        lines.append("| 序号 | 代码 | 名称 | 板块 | 行业 | 催化关键词 | 匹配方式 | 来源文章 |")
-        lines.append("|------|------|------|------|------|-----------|---------|---------|")
+        lines.append("| 序号 | 代码 | 名称 | 板块 | 行业 | 主营业务 | 搜索词命中 | 匹配分 | 来源文章 |")
+        lines.append("|------|------|------|------|------|---------|-----------|-------|---------|")
         for i, s in enumerate(stocks, 1):
-            keywords = ", ".join(s.get("catalyst_keywords", [])[:5])
+            matched_terms = ", ".join(s.get("matched_terms", [])[:5])
+            biz = s.get("main_business", "")[:40]
             lines.append(
                 f"| {i} | {s.get('stock_code','')} | {s.get('stock_name','')} | "
                 f"{s.get('sector','')} | {s.get('industry','')} | "
-                f"{keywords} | {s.get('matched_by','')} | {s.get('source_article','')[:40]} |"
+                f"{biz} | {matched_terms} | {s.get('match_score',0)} | {s.get('source_article','')[:30]} |"
             )
         lines.append("")
 
     lines.append("---")
-    lines.append("*本文件由 vip_extractor.py v2 自动生成*")
-    lines.append(f"*数据来源: 财联社VIP API + Tushare | 生成时间: {report_date_str}*")
+    lines.append("*本文件由 vip_extractor.py v3（搜索式发现）自动生成*")
+    lines.append(f"*数据来源: 财联社VIP API(分页) + Tushare stock_company主营业务搜索 | 生成时间: {report_date_str}*")
 
     md_content = '\n'.join(lines)
     md_path = os.path.join(reports_dir, f"{report_date_str}_VIP信息表.md")
@@ -540,12 +599,11 @@ if __name__ == "__main__":
         cls_vip = chapter0.get("cls_vip", {})
         if isinstance(cls_vip, dict) and cls_vip.get("articles"):
             articles = cls_vip["articles"]
-            print(f"=== VIP信息提取器 v2 测试 ({len(articles)} 篇文章) ===")
+            print(f"=== VIP信息提取器 v3 测试 ({len(articles)} 篇文章) ===")
             result = extract_vip_info(articles)
             print(json.dumps(result, ensure_ascii=False, indent=2)[:3000])
 
-            # 生成MD文件
-            md_path = generate_vip_md_report(result, "2026-06-25")
+            md_path = generate_vip_md_report(result, "2026-06-26")
             print(f"\nMD文件: {md_path}")
         else:
             print("未找到VIP文章数据")

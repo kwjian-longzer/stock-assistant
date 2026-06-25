@@ -486,22 +486,24 @@ def check_cross_validation_density(report_text: str) -> tuple[bool, list[str]]:
 
 
 def check_heat_curve(report_text: str) -> tuple[bool, list[str]]:
-    """红线11（v2.0新增）：检查时间-热度变化曲线
+    """红线11（v2.0新增）：检查时间-热度变化曲线（按天计）
 
-    报告中至少出现1处文本可视化的热度曲线，
-    标志: 含热度曲线符号(▂▃▄▅▆▇█) 或 "时间-热度"/"热度"相关表述
+    报告中至少出现1处按天的热度曲线，
+    标志: 含热度曲线符号(▁▂▃▄▅▆▇█) 或 "热度"/"日期"+"曲线"组合
     """
     errors = []
     # 检查热度曲线符号
-    curve_chars = ['▂', '▃', '▄', '▅', '▆', '▇', '█']
+    curve_chars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
     has_curve = any(c in report_text for c in curve_chars)
-    # 检查热度曲线文字描述
-    has_heat_text = '热度' in report_text and ('曲线' in report_text or '时段' in report_text)
+    # 检查按天热度曲线文字描述
+    has_heat_text = '热度' in report_text and ('曲线' in report_text or '日期' in report_text)
+    # 检查资金流向生命周期
+    has_capital_phase = any(kw in report_text for kw in ['主力开始进', '主力退出', '散户站岗', '资金跟进', '资金流向生命周期'])
 
     if not has_curve and not has_heat_text:
         errors.append(
-            "缺少时间-热度变化曲线：核心热点需用文本曲线展示当日热度变化"
-            "（使用 ▂▃▄▅▆▇█ 符号 + 时段标注）"
+            "缺少时间-热度变化曲线：核心热点需用文本曲线展示近5日热度变化"
+            "（含日期/热度/曲线/资金行 + ▁▂▃▄▅▆▇█符号）"
         )
         return False, errors
 
