@@ -21,24 +21,35 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 PLACEHOLDER_PATTERN = re.compile(
-    r'(XXX|xxx|？？|待补充|TODO|TBD|待定|placeholder)',
+    r'(XXX|xxx|×××|？？|\?\?\?|待补充|待填|待更新|TODO|TBD|待定|placeholder)',
     re.IGNORECASE,
 )
 
 WARNING_KEYWORDS = ['数据暂缺', 'DEGRADED', '降级']
 
-# 六章结构关键词：每个章节至少匹配一个关键词
+# v2.0: 热点生命周期关键词
+HOTSPOT_LIFECYCLE_KEYWORDS = ['崛起', '高潮', '退烧']
+
+# v2.0: 金股龙脉定位关键词
+DRAGON_VEIN_KEYWORDS = ['潜龙在渊', '潜龙', '见龙在田', '见龙', '飞龙在天', '飞龙']
+
+# v2.0: 金股推理链关键词（至少出现这些要素才算完整推理链）
+REASONING_CHAIN_KEYWORDS = ['信号', '验证', '概率']
+
+# 章节结构关键词：三层递进 + 风险声明
 CHAPTER_KEYWORDS = [
+    # 第零章（v2.0新增：财联社信源扫描）
+    ['财联社', '信源', '电报', '第零章'],
     # 第一章
-    ['市场全景', '第一章'],
+    ['市场全景', '指数', '全景', '第一章', '信号与全景'],
     # 第二章
-    ['信号验证', '第二章'],
+    ['信号验证', '热点', '第二章', '热点追踪'],
     # 第三章
-    ['资金流向', '第三章'],
+    ['资金流向', '资金', '第三章', '龙虎榜'],
     # 第四章
-    ['涨停', '第四章'],
+    ['涨停', '情绪', '第四章', '涨跌停'],
     # 第五章
-    ['策略', '第五章'],
+    ['策略', '金股', '第五章', '金股与策略'],
     # 第六章
     ['风险', '免责', '第六章'],
 ]
@@ -64,7 +75,8 @@ STOCK_CODE_PATTERN = re.compile(
     r'\b(\d{6})\b|(?:\b\d{6}\.(SH|SZ|sh|sz)\b)'
 )
 
-MIN_CHAR_COUNT = 6000
+MIN_CHAR_COUNT_DAILY = 6000
+MIN_CHAR_COUNT_WEEKLY = 8000
 
 # 数据一致性允许误差（百分比）
 TOLERANCE_PCT = 0.5
@@ -346,30 +358,148 @@ def check_stock_codes(report_text: str, summary: dict) -> tuple[bool, list[str]]
     return True, []
 
 
-def check_min_length(report_text: str) -> tuple[bool, list[str]]:
-    """红线5：检查最小长度"""
+def check_min_length(report_text: str, report_name: str = "") -> tuple[bool, list[str]]:
+    """红线5：检查最小长度（v2.0: 按报告类型区分阈值）"""
     char_count = len(report_text)
-    if char_count < MIN_CHAR_COUNT:
+    is_weekly = '周报' in report_name if report_name else '周报' in report_text
+    min_count = MIN_CHAR_COUNT_WEEKLY if is_weekly else MIN_CHAR_COUNT_DAILY
+    label = "周报" if is_weekly else "日报"
+    if char_count < min_count:
         return False, [
-            f"报告字符数 {char_count}，低于最小要求 {MIN_CHAR_COUNT} 字符"
+            f"{label}字符数 {char_count}，低于最小要求 {min_count} 字符"
         ]
     return True, []
 
 
+def check_hotspot_lifecycle(report_text: str) -> tuple[bool, list[str]]:
+    """红线7（v2.0新增）：检查热点生命周期标注
+
+    报告必须包含至少2种热点生命周期状态（崛起/高潮/退烧），
+    否则视为缺乏热点追踪洞见。
+    """
+    errors = []
+    found_states = []
+    for kw in HOTSPOT_LIFECYCLE_KEYWORDS:
+        if kw in report_text:
+            found_states.append(kw)
+
+    if len(found_states) < 2:
+        missing = [kw for kw in HOTSPOT_LIFECYCLE_KEYWORDS if kw not in found_states]
+        errors.append(
+            f"热点生命周期标注不足：仅发现 {found_states if found_states else '无'}，"
+            f"缺少 {missing}。报告应标注热点的崛起/高潮/退烧状态"
+        )
+        return False, errors
+
+    return True, []
+
+
+def check_dragon_vein(report_text: str) -> tuple[bool, list[str]]:
+    """红线8（v2.0新增）：检查金股龙脉定位
+
+    金股推荐必须包含龙脉定位（潜龙在渊/见龙在田/飞龙在天）。
+    """
+    errors = []
+    found_veins = []
+    for kw in DRAGON_VEIN_KEYWORDS:
+        if kw in report_text:
+            # 取完整词（如"潜龙"→检查是否"潜龙在渊"）
+            full_term = None
+            for full in ['潜龙在渊', '见龙在田', '飞龙在天']:
+                if full in report_text:
+                    full_term = full
+                    break
+            if full_term and full_term not in found_veins:
+                found_veins.append(full_term)
+
+    if not found_veins:
+        errors.append(
+            "金股缺少龙脉定位：报告中未发现'潜龙在渊/见龙在田/飞龙在天'标注。"
+            "每只金股必须标注龙脉阶段"
+        )
+        return False, errors
+
+    return True, []
+
+
+def check_reasoning_chain(report_text: str) -> tuple[bool, list[str]]:
+    """红线9（v2.0新增）：检查金股推理链完整性
+
+    金股部分必须包含推理链要素：信号源 + 数据验证 + 概率评估。
+    """
+    errors = []
+    # 检查金股代码块（```金股 或 金股N: 格式）
+    gold_stock_sections = re.findall(
+        r'(?:金股\d*[:：]|```金股)(.*?)(?:```|\n\n)',
+        report_text, re.DOTALL
+    )
+
+    if not gold_stock_sections:
+        # 也检查简单的"金股"附近文本
+        gold_stock_sections = []
+        parts = report_text.split('金股')
+        for i in range(1, len(parts)):
+            gold_stock_sections.append(parts[i][:500])
+
+    if not gold_stock_sections:
+        # 没有金股推荐部分，不校验（可能是周报无金股）
+        return True, []
+
+    incomplete_count = 0
+    for section in gold_stock_sections:
+        has_signal = '信号' in section or '电报' in section or 'VIP' in section or '研报' in section
+        has_verify = '验证' in section or '龙虎榜' in section or '资金' in section or '涨停' in section or '共振' in section
+        has_prob = '概率' in section or '倾向于' in section or '大概率' in section or '值得警惕' in section or '%' in section
+
+        if not (has_signal and has_verify and has_prob):
+            incomplete_count += 1
+
+    if incomplete_count > 0:
+        errors.append(
+            f"有 {incomplete_count} 只金股的推理链不完整（缺少信号源/数据验证/概率评估中的某一项）"
+        )
+        return False, errors
+
+    return True, []
+
+
+def check_cross_validation_density(report_text: str) -> tuple[bool, list[str]]:
+    """红线10（v2.0新增）：检查交叉验证密度
+
+    报告全文至少出现10处"信号→数据印证"的交叉引用。
+    交叉引用的标志词：验证/印证/交叉/呼应/共振/一致/背离/分歧
+    """
+    errors = []
+    cross_keywords = ['验证', '印证', '交叉', '呼应', '共振', '一致', '背离', '分歧']
+    density = 0
+    for kw in cross_keywords:
+        density += report_text.count(kw)
+
+    if density < 10:
+        errors.append(
+            f"交叉验证密度不足：仅 {density} 处交叉引用（验证/印证/共振/呼应等），"
+            f"要求至少10处。这是洞见密度的量化指标"
+        )
+        return False, errors
+
+    return True, []
+
+
 def check_chapter_structure(report_text: str) -> tuple[bool, list[str]]:
-    """红线6：检查六章结构完整性"""
+    """红线6：检查章节结构完整性（v2.0: 含第零章共七组）"""
     errors = []
     missing_chapters = []
+    # v2.0: CHAPTER_KEYWORDS 现在包含7组（第零章到第六章）
+    chapter_labels = ['第零章', '第一章', '第二章', '第三章', '第四章', '第五章', '第六章']
 
-    for i, keywords in enumerate(CHAPTER_KEYWORDS, start=1):
+    for i, keywords in enumerate(CHAPTER_KEYWORDS):
         found = False
         for kw in keywords:
             if kw in report_text:
                 found = True
                 break
         if not found:
-            chapter_label = f"第{i}章"
-            missing_chapters.append(chapter_label)
+            missing_chapters.append(chapter_labels[i])
 
     if missing_chapters:
         errors.append(
@@ -396,10 +526,12 @@ def check_warnings(report_text: str) -> list[str]:
 def validate(report_path: str, summary_path: str) -> dict:
     """
     执行所有校验规则，返回结构化结果。
+    v2.0: 新增红线7-10（热点追踪/龙脉定位/推理链/交叉验证密度）
     """
     # 加载文件
     report_text = load_report(report_path)
     summary = load_json(summary_path)
+    report_name = Path(report_path).name
 
     errors = []
     warnings = []
@@ -420,13 +552,29 @@ def validate(report_path: str, summary_path: str) -> dict:
     stock_ok, stock_errors = check_stock_codes(report_text, summary)
     errors.extend(stock_errors)
 
-    # 红线5：最小长度
-    length_ok, length_errors = check_min_length(report_text)
+    # 红线5：最小长度（v2.0: 按报告类型区分）
+    length_ok, length_errors = check_min_length(report_text, report_name)
     errors.extend(length_errors)
 
-    # 红线6：六章结构
+    # 红线6：章节结构（v2.0: 含第零章共七组）
     chapter_ok, chapter_errors = check_chapter_structure(report_text)
     errors.extend(chapter_errors)
+
+    # 红线7（v2.0新增）：热点生命周期标注
+    hotspot_ok, hotspot_errors = check_hotspot_lifecycle(report_text)
+    errors.extend(hotspot_errors)
+
+    # 红线8（v2.0新增）：金股龙脉定位
+    dragon_ok, dragon_errors = check_dragon_vein(report_text)
+    errors.extend(dragon_errors)
+
+    # 红线9（v2.0新增）：金股推理链完整性
+    chain_ok, chain_errors = check_reasoning_chain(report_text)
+    errors.extend(chain_errors)
+
+    # 红线10（v2.0新增）：交叉验证密度
+    cross_ok, cross_errors = check_cross_validation_density(report_text)
+    errors.extend(cross_errors)
 
     # 警告
     warnings.extend(check_warnings(report_text))
@@ -438,6 +586,10 @@ def validate(report_path: str, summary_path: str) -> dict:
         'placeholder_found': not placeholder_ok,
         'data_consistency': index_ok and pct_ok,
         'stock_code_valid': stock_ok,
+        'hotspot_tracked': hotspot_ok,
+        'dragon_vein_labeled': dragon_ok,
+        'reasoning_chain_complete': chain_ok,
+        'cross_validation_density': cross_ok,
     }
 
     valid = len(errors) == 0
@@ -462,10 +614,14 @@ def print_human_readable(result: dict):
     stats = result['stats']
     print(f'\n  --- 统计信息 ---')
     print(f'  字符数:           {stats["char_count"]}')
-    print(f'  六章结构完整:     {"是" if stats["has_all_chapters"] else "否"}')
+    print(f'  章节结构完整:     {"是" if stats["has_all_chapters"] else "否"}')
     print(f'  占位符检测:       {"发现" if stats["placeholder_found"] else "未发现"}')
     print(f'  数据一致性:       {"通过" if stats["data_consistency"] else "不一致"}')
     print(f'  股票代码有效:     {"是" if stats["stock_code_valid"] else "否"}')
+    print(f'  热点追踪标注:     {"是" if stats.get("hotspot_tracked") else "否"}')
+    print(f'  金股龙脉定位:     {"是" if stats.get("dragon_vein_labeled") else "否"}')
+    print(f'  推理链完整性:     {"是" if stats.get("reasoning_chain_complete") else "否"}')
+    print(f'  交叉验证密度:     {"通过" if stats.get("cross_validation_density") else "不足"}')
 
     if result['errors']:
         print(f'\n  --- 错误（{len(result["errors"])} 项）---')
