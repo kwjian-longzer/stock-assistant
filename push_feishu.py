@@ -15,6 +15,7 @@ import os
 import json
 import re
 import argparse
+import subprocess
 import requests
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -550,6 +551,120 @@ def generate_qsq_md_report(qsq_json_path, report_date_str):
 
 
 # ---------------------------------------------------------------------------
+# Git 自动提交与推送（v2.0: 报告和数据存入仓库）
+# ---------------------------------------------------------------------------
+
+def git_commit_and_push(report_path):
+    """将报告和数据文件提交到 GitHub 仓库
+
+    在飞书推送成功后自动执行，确保报告MD、数据摘要、钱三强选股结果
+    持久化到仓库，供后续质量评估和周末汇总使用。
+
+    Args:
+        report_path: 本次推送的报告文件路径
+
+    Returns:
+        bool: 是否成功提交并推送
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    print(f"\n{'='*60}")
+    print("  [步骤3] Git 提交报告与数据到仓库")
+    print(f"{'='*60}")
+
+    # 确保在项目根目录执行 git 命令
+    git_cmd_prefix = ["git", "-C", script_dir]
+
+    def run_git(args, check=False):
+        """执行 git 命令并返回结果"""
+        cmd = git_cmd_prefix + args
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30
+            )
+            if check and result.returncode != 0:
+                print(f"  [ERROR] git {' '.join(args)} 失败: {result.stderr.strip()}")
+            return result
+        except subprocess.TimeoutExpired:
+            print(f"  [ERROR] git {' '.join(args)} 超时")
+            return None
+        except Exception as e:
+            print(f"  [ERROR] git {' '.join(args)} 异常: {e}")
+            return None
+
+    # 检查是否在 git 仓库中
+    rev_parse = run_git(["rev-parse", "--git-dir"])
+    if not rev_parse or rev_parse.returncode != 0:
+        print("  [SKIP] 不在 git 仓库中，跳过提交")
+        return False
+
+    # 设置 git 用户信息（自动任务环境可能未配置）
+    run_git(["config", "user.name", "stock-assistant-bot"])
+    run_git(["config", "user.email", "bot@stock-assistant"])
+
+    # 从报告文件名提取日期和类型
+    base_name = os.path.basename(report_path)
+    report_label = base_name.replace('.md', '')
+
+    # 收集要提交的文件
+    files_to_add = []
+
+    # 1. 报告MD文件
+    if os.path.exists(report_path):
+        files_to_add.append(report_path)
+
+    # 2. 钱三强选股MD文件（如果有）
+    reports_dir = os.path.join(script_dir, "reports")
+    date_str = base_name.split('_')[0] if '_' in base_name else ""
+    qsq_md = os.path.join(reports_dir, f"{date_str}_钱三强选股.md")
+    if os.path.exists(qsq_md):
+        files_to_add.append(qsq_md)
+
+    # 3. 数据摘要文件
+    data_summary_path = os.path.join(script_dir, "data", "data_summary.json")
+    if os.path.exists(data_summary_path):
+        files_to_add.append(data_summary_path)
+
+    # 4. 钱三强选股结果JSON
+    qsq_json_path = os.path.join(script_dir, "data", "qian_sanqiang_results.json")
+    if os.path.exists(qsq_json_path):
+        files_to_add.append(qsq_json_path)
+
+    if not files_to_add:
+        print("  [SKIP] 没有需要提交的文件")
+        return False
+
+    # git add 各文件
+    for f in files_to_add:
+        rel_path = os.path.relpath(f, script_dir)
+        run_git(["add", rel_path])
+        print(f"  [ADD] {rel_path}")
+
+    # 检查是否有暂存的变更
+    diff_result = run_git(["diff", "--cached", "--quiet"])
+    if diff_result and diff_result.returncode == 0:
+        print("  [SKIP] 没有新的变更需要提交")
+        return True  # 不是错误，只是没有变更
+
+    # git commit
+    commit_msg = f"report: {report_label} 报告+数据自动提交"
+    commit_result = run_git(["commit", "-m", commit_msg], check=True)
+    if not commit_result or commit_result.returncode != 0:
+        print("  [ERROR] git commit 失败")
+        return False
+    print(f"  [OK] 提交成功: {commit_msg}")
+
+    # git push
+    push_result = run_git(["push", "origin", "main"], check=True)
+    if not push_result or push_result.returncode != 0:
+        print("  [ERROR] git push 失败")
+        return False
+
+    print(f"  [OK] 已推送到 GitHub (main)")
+    print(f"{'='*60}")
+    return True
+
+
+# ---------------------------------------------------------------------------
 # 主推送函数
 # ---------------------------------------------------------------------------
 
@@ -621,16 +736,20 @@ def push_to_feishu(file_path):
     print(f"\n[步骤2] 通过Webhook发送重要提醒+金股摘要...")
     webhook_sent = send_summary_via_webhook(file_path)
 
+    # --- 步骤3: Git 提交报告与数据到仓库 ---
+    git_ok = git_commit_and_push(file_path)
+
     # --- 汇总 ---
     print(f"\n{'='*60}")
     if file_sent and qsq_sent:
-        print(f"  ✅ 报告+选股文件发送成功 + 摘要推送{'成功' if webhook_sent else '跳过'}")
+        print(f"  飞书: 报告+选股文件发送成功 + 摘要推送{'成功' if webhook_sent else '跳过'}")
     elif file_sent:
-        print(f"  ✅ 报告文件发送成功(选股文件{'成功' if qsq_sent else '失败'}) + 摘要推送{'成功' if webhook_sent else '跳过'}")
+        print(f"  飞书: 报告文件发送成功(选股文件{'成功' if qsq_sent else '失败'}) + 摘要推送{'成功' if webhook_sent else '跳过'}")
     elif webhook_sent:
-        print(f"  ⚠️ 文件发送失败，但摘要推送已发送")
+        print(f"  飞书: 文件发送失败，但摘要推送已发送")
     else:
-        print(f"  ❌ 文件和摘要推送均发送失败")
+        print(f"  飞书: 文件和摘要推送均发送失败")
+    print(f"  仓库: {'提交+推送成功' if git_ok else '跳过或失败'}")
     print(f"{'='*60}")
 
     return file_sent or webhook_sent

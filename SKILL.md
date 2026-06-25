@@ -26,12 +26,12 @@ stock-assistant/
 ├── validate_report.py    # 报告校验 - 校验报告数据真实性和质量
 ├── push_feishu.py        # 飞书推送 - 推送MD文件+重要提醒+金股摘要到飞书群机器人
 ├── config.json           # 持久化配置 - 飞书Webhook等（自动化任务可读取）
-├── data/                 # 数据目录
-│   ├── raw_data_*.json   # 原始采集数据（24万行+，AI不应直接读取）
-│   ├── raw_data_latest.json  # 最新原始数据软链接
-│   ├── qian_sanqiang_results.json  # 钱三强选股结果（三强合一+共振分析）
-│   └── data_summary.json # 数据摘要（AI写报告的唯一数据来源）
-└── reports/              # 报告输出目录
+├── data/                 # 数据目录（v2.0: data_summary.json和qian_sanqiang_results.json纳入git）
+│   ├── raw_data_*.json   # 原始采集数据（24万行+，AI不应直接读取，gitignore排除）
+│   ├── raw_data_latest.json  # 最新原始数据软链接（gitignore排除）
+│   ├── qian_sanqiang_results.json  # 钱三强选股结果（三强合一+共振分析）✅纳入git
+│   └── data_summary.json # 数据摘要（AI写报告的唯一数据来源）✅纳入git
+└── reports/              # 报告输出目录（v2.0: ✅纳入git，自动commit+push）
     └── YYYY-MM-DD_晨报/午报/晚报.md
 ```
 
@@ -75,10 +75,11 @@ stock-assistant/
          → 推送方式：MD文件（Open API）+ 重要提醒+金股摘要（Webhook）
          → 不发送全文，文字内容仅含重要提醒和金股推荐
          → 自动生成钱三强选股结果MD文件，与报告MD一起发送
+         → **推送后自动 git commit + push 报告MD、数据摘要、钱三强选股结果到GitHub**
 
 步骤6:   git add -A && git commit -m "..." && git push origin main
-         → **如果执行过程中修改了任何代码文件，必须commit并push到GitHub**
-         → 否则下次自动任务git pull拉取的仍是旧代码，修改无效
+         → **仅用于代码文件修改的提交**（报告和数据已在步骤5自动提交）
+         → 如果执行过程中修改了任何代码文件（.py/.md），必须commit并push到GitHub
 ```
 
 ---
