@@ -222,3 +222,136 @@ API 采集函数独立测试结果（2026-06-25）：
 ```
 
 4 个页面全部通过 API 成功采集，无需浏览器降级。`extract_summary.py` 的兼容性修复也已验证，能正确读取 API 返回的 `related_stock` 和 `events` 字段。
+
+诊断函数 `cls_api_diagnostic()` 测试结果（2026-06-25）：
+
+```
+[1] sv 版本号检测: 未检测到（首页HTML不含明文版本号），使用默认 8.7.9
+[2] 端点测试: 5/5 全部成功
+[3] 诊断总结: 所有端点正常
+```
+
+---
+
+## 八、Agent 自修复指南
+
+> 本章供自动任务执行 Agent 在遇到 CLS API 采集失败时参照操作。
+> 自动任务已授权 Agent 在 CLS API 故障时修改 `fetch_data.py` 中的 CLS 相关函数。
+
+### 8.0 第一步：运行诊断
+
+当步骤 1 的日志出现 `[CLS API] xxx 请求失败` 或 `[CLS] API采集失败的页面` 时，立即运行：
+
+```bash
+cd /workspace/stock-assistant && python -c "from fetch_data import cls_api_diagnostic; cls_api_diagnostic()"
+```
+
+根据诊断结果中的失败模式，对照下方三种场景执行修复。
+
+### 8.1 场景A：全部端点失败（签名或 sv 问题）
+
+**特征**: 诊断报告显示所有 5 个端点均为 FAILED。
+
+**原因**: 财联社前端版本更新导致 `sv` 参数变化，或签名算法变更。
+
+**修复步骤**:
+
+1. 用浏览器访问 `https://www.cls.cn/`，等待页面加载完成
+2. 执行 `browser_network_requests` 获取所有网络请求
+3. 在请求列表中筛选 `cls.cn` 域名下携带 `sign` 参数的 API 请求
+4. 从该请求的 query string 中提取 `sv` 参数值（如 `sv=8.8.0`）
+5. 修改 `fetch_data.py` 中的 `_CLS_DEFAULT_SV` 常量：
+   ```python
+   _CLS_DEFAULT_SV = '8.8.0'  # 更新为检测到的值
+   ```
+6. 重新运行诊断函数验证：`python -c "from fetch_data import cls_api_diagnostic; cls_api_diagnostic()"`
+7. 如果仍然全部失败，说明签名算法可能已变更。执行步骤 8-12
+8. 从浏览器网络请求中提取一个完整的 API 请求 URL（含所有参数和 sign 值）
+9. 用 Python 复现签名算法：
+   ```python
+   import hashlib, urllib.parse
+   params = {'app': 'CailianpressWeb', 'os': 'web', 'sv': '新版本号', ...业务参数}
+   sorted_params = dict(sorted(params.items()))
+   query_string = urllib.parse.urlencode(sorted_params)
+   sha1 = hashlib.sha1(query_string.encode()).hexdigest()
+   sign = hashlib.md5(sha1.encode()).hexdigest()
+   print(sign)  # 与浏览器中的 sign 对比
+   ```
+10. 如果不匹配，尝试其他哈希组合：`MD5(query_string)` 直接、`SHA256(query_string)` 等
+11. 找到匹配的算法后，修改 `_cls_sign()` 函数
+12. 重新运行诊断验证
+
+### 8.2 场景B：部分端点失败（接口路径变更）
+
+**特征**: 诊断报告显示 1-3 个端点 FAILED，其余正常。
+
+**原因**: 财联社改版导致某个页面的 API 路径变化。
+
+**修复步骤**:
+
+1. 根据失败的端点名，确定对应的财联社页面：
+   - 深度头条 → `https://www.cls.cn/depth?id=1000`
+   - VIP文章 → `https://www.cls.cn/vip`
+   - 投资日历 → `https://www.cls.cn/investkalendar`
+   - 首页热门 → `https://www.cls.cn/`
+2. 用浏览器访问该页面，等待加载完成
+3. 执行 `browser_network_requests` 获取网络请求
+4. 在请求列表中找到返回 JSON 数据的 API 请求（通常路径含 `/v`、`/api`、`/featured` 等）
+5. 记录新的 API 路径
+6. 修改 `fetch_data.py` 中 `fetch_cls_pages_via_api()` 函数内对应端点的路径：
+   ```python
+   # 例如深度头条路径从 /v3/depth/home/assembled/1000 变为 /v4/depth/home/assembled/1000
+   depth_data = _cls_api_get('/v4/depth/home/assembled/1000')
+   ```
+7. 如果返回的 JSON 结构也变了，参照场景C
+8. 重新运行诊断验证
+
+### 8.3 场景C：API成功但数据解析异常（返回结构变更）
+
+**特征**: 诊断报告显示端点 OK，但 `extract_summary.py` 输出的 `data_summary.json` 中 CLS 相关字段为"数据暂缺"或数据明显不完整。
+
+**原因**: API 返回的 JSON 结构变化，原有字段名不再存在。
+
+**修复步骤**:
+
+1. 单独打印 API 返回的原始数据结构：
+   ```python
+   from fetch_data import _cls_api_get
+   data = _cls_api_get('/v3/depth/home/assembled/1000')
+   if data and isinstance(data, dict):
+       print("顶层keys:", list(data.keys()))
+       for k, v in data.items():
+           if isinstance(v, list) and len(v) > 0:
+               print(f"  {k}[0] keys:", list(v[0].keys()) if isinstance(v[0], dict) else type(v[0]))
+   ```
+2. 对比 `fetch_data.py` 中 `fetch_cls_pages_via_api()` 函数使用的字段名（如 `depth_list`、`recommend_list`、`free_top_v2` 等）
+3. 如果字段名已变化，更新 `fetch_cls_pages_via_api()` 中的字段引用
+4. 同时检查 `extract_summary.py` 中 `extract_chapter0_cls()` 函数是否需要同步修改（如 `articles`、`events`、`related_stock` 等键名）
+5. 重新运行完整流程验证：
+   ```bash
+   python -c "from fetch_data import fetch_cls_pages_via_api; r = fetch_cls_pages_via_api({}); print({k: v.get('article_count', v.get('event_count', 0)) for k, v in r.items()})"
+   ```
+
+### 8.4 修复后的必要操作
+
+无论哪种场景，修复完成后必须执行：
+
+```bash
+cd /workspace/stock-assistant
+git add fetch_data.py extract_summary.py
+git commit -m "fix: 修复CLS API采集(原因简述)"
+git push origin main
+```
+
+然后重新执行步骤 1（`python fetch_data.py morning/noon/evening`）继续后续流程。
+
+### 8.5 无法修复时的降级方案
+
+如果以上修复均不成功，执行浏览器降级采集：
+
+1. 用浏览器依次访问 4 个财联社页面
+2. 每个页面用 `browser_evaluate` 执行 `document.body.innerText` 提取文本
+3. 保存到 `data/cls_pages.json`，格式：`{"深度头条":"文本...","VIP文章":"文本...","投资日历":"文本...","首页":"文本..."}`
+4. 重新执行步骤 1，`fetch_cls_pages()` 会自动读取 `cls_pages.json` 做浏览器降级解析
+
+这是最后的保底方案，数据质量不如 API 结构化数据，但能保证流程不中断。

@@ -47,6 +47,8 @@ stock-assistant/
          → fetch_data.py优先使用API直接采集深度头条/VIP/投资日历/首页
          → API采集失败时降级到浏览器采集（保存到 data/cls_pages.json）
          → 电报由fetch_data.py通过API直接获取，无需浏览器
+         → CLS API故障时：运行 python -c "from fetch_data import cls_api_diagnostic; cls_api_diagnostic()" 诊断
+         → 参照 docs/CLS_API_STRATEGY.md 第八章 Agent自修复指南 修复
 
 步骤1:   python fetch_data.py [morning|noon|evening]
          → 生成 data/raw_data_YYYYMMDD_mode.json + data/raw_data_latest.json

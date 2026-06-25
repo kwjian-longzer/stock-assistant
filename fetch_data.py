@@ -953,8 +953,66 @@ def _cls_sign(params):
     return sign
 
 
+# CLS API 默认参数（sv 可能随前端版本更新而变化）
+_CLS_DEFAULT_SV = '8.7.9'
+_cls_detected_sv = None  # 缓存自动检测到的 sv
+
+
+def _cls_detect_sv():
+    """从财联社首页自动检测当前 sv 版本号
+
+    通过获取 cls.cn 首页 HTML，在 script 标签的 src 属性中
+    查找版本号格式的字符串（如 8.7.9, 8.8.0 等）。
+
+    Returns:
+        str: 检测到的 sv 版本号，失败返回 None
+    """
+    global _cls_detected_sv
+    if _cls_detected_sv:
+        return _cls_detected_sv
+
+    import re
+    try:
+        resp = requests.get('https://www.cls.cn/', timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        })
+        html = resp.text
+
+        # 方式1: 在 script src 中查找版本号 (如 /dist/main.8.7.9.js 或 ?v=8.7.9)
+        script_srcs = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', html)
+        for src in script_srcs:
+            # 查找 x.y.z 格式的版本号
+            ver_match = re.search(r'(\d+\.\d+\.\d+)', src)
+            if ver_match:
+                _cls_detected_sv = ver_match.group(1)
+                print(f"  [CLS] 自动检测到 sv 版本号: {_cls_detected_sv} (来源: {src})")
+                return _cls_detected_sv
+
+        # 方式2: 在内联 JS 中查找 sv 赋值
+        sv_match = re.search(r'["\']sv["\']\s*[:=]\s*["\'](\d+\.\d+\.\d+)["\']', html)
+        if sv_match:
+            _cls_detected_sv = sv_match.group(1)
+            print(f"  [CLS] 自动检测到 sv 版本号: {_cls_detected_sv} (来源: 内联JS)")
+            return _cls_detected_sv
+
+        # 方式3: 在 meta 标签中查找版本号
+        meta_match = re.search(r'content=["\'](\d+\.\d+\.\d+)["\']', html)
+        if meta_match:
+            _cls_detected_sv = meta_match.group(1)
+            print(f"  [CLS] 自动检测到 sv 版本号: {_cls_detected_sv} (来源: meta标签)")
+            return _cls_detected_sv
+
+        print("  [CLS] 未能从首页自动检测 sv 版本号")
+        return None
+    except Exception as e:
+        print(f"  [CLS] sv 自动检测失败: {e}")
+        return None
+
+
 def _cls_api_get(path, extra_params=None, base='https://www.cls.cn'):
-    """调用财联社API（自动签名）
+    """调用财联社API（自动签名，支持 sv 自动降级）
+
+    优先使用默认 sv，失败后尝试自动检测 sv 并重试。
 
     Args:
         path: API路径，如 /v3/depth/home/assembled/1000
@@ -964,29 +1022,110 @@ def _cls_api_get(path, extra_params=None, base='https://www.cls.cn'):
     Returns:
         dict: API返回的JSON数据，失败返回None
     """
-    params = {'app': 'CailianpressWeb', 'os': 'web', 'sv': '8.7.9'}
-    if extra_params:
-        params.update(extra_params)
-    sign = _cls_sign(params)
-    params['sign'] = sign
+    def _try_request(sv_value):
+        params = {'app': 'CailianpressWeb', 'os': 'web', 'sv': sv_value}
+        if extra_params:
+            params.update(extra_params)
+        sign = _cls_sign(params)
+        params['sign'] = sign
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://www.cls.cn/',
-        'Accept': 'application/json, text/plain, */*',
-    }
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.cls.cn/',
+            'Accept': 'application/json, text/plain, */*',
+        }
 
-    try:
-        resp = requests.get(f"{base}{path}", params=params, headers=headers, timeout=15)
-        data = resp.json()
-        if data.get('error') == 0 or data.get('errno') == 0 or 'data' in data:
-            return data.get('data')
-        else:
-            print(f"  [CLS API] {path} 返回错误: {data.get('msg', data.get('error', '未知'))}")
+        try:
+            resp = requests.get(f"{base}{path}", params=params, headers=headers, timeout=15)
+            data = resp.json()
+            if data.get('error') == 0 or data.get('errno') == 0 or 'data' in data:
+                return data.get('data')
+            else:
+                return None
+        except Exception:
             return None
-    except Exception as e:
-        print(f"  [CLS API] {path} 请求失败: {e}")
-        return None
+
+    # 第一次尝试：使用默认 sv
+    result = _try_request(_CLS_DEFAULT_SV)
+    if result is not None:
+        return result
+
+    # 默认 sv 失败，尝试自动检测 sv
+    detected_sv = _cls_detect_sv()
+    if detected_sv and detected_sv != _CLS_DEFAULT_SV:
+        print(f"  [CLS API] 默认sv={_CLS_DEFAULT_SV}失败，尝试检测到的sv={detected_sv}")
+        result = _try_request(detected_sv)
+        if result is not None:
+            print(f"  [CLS API] sv={detected_sv} 成功! 建议更新 _CLS_DEFAULT_SV")
+            return result
+
+    # 两种 sv 都失败
+    print(f"  [CLS API] {path} 请求失败 (sv={_CLS_DEFAULT_SV})")
+    return None
+
+
+def cls_api_diagnostic():
+    """CLS API 诊断函数 — 测试所有端点并输出报告
+
+    当 CLS API 采集失败时，Agent 可调用此函数快速定位问题。
+    返回 dict 包含每个端点的状态和错误信息。
+    """
+    print("=" * 60)
+    print("CLS API 诊断报告")
+    print("=" * 60)
+
+    # 1. 检测 sv
+    print("\n[1] sv 版本号检测:")
+    detected = _cls_detect_sv()
+    if detected:
+        print(f"    检测到: {detected}, 代码默认: {_CLS_DEFAULT_SV}")
+        if detected != _CLS_DEFAULT_SV:
+            print(f"    ⚠ 版本不一致! 需更新 fetch_data.py 中 _CLS_DEFAULT_SV = '{detected}'")
+    else:
+        print(f"    自动检测失败, 使用默认值: {_CLS_DEFAULT_SV}")
+
+    # 2. 测试每个端点
+    endpoints = [
+        ('深度头条', '/v3/depth/home/assembled/1000', None),
+        ('VIP文章-首页', '/featured/v1/home/assembled', None),
+        ('VIP文章-推荐', '/featured/v2/home/recommend/article',
+         {'last_time': str(int(__import__('time').time())), 'refresh_Type': '1'}),
+        ('投资日历', '/api/calendar/web/list', {'flag': '0', 'type': '0'}),
+        ('首页热门', '/v2/article/hot/list', None),
+    ]
+
+    print("\n[2] 端点测试:")
+    report = {'sv_default': _CLS_DEFAULT_SV, 'sv_detected': detected, 'endpoints': {}}
+    for name, path, params in endpoints:
+        print(f"\n  测试 {name}: {path}")
+        data = _cls_api_get(path, params)
+        if data is not None:
+            if isinstance(data, dict):
+                keys = list(data.keys())[:5]
+                count = sum(len(data.get(k, [])) for k in keys if isinstance(data.get(k), list))
+                print(f"    ✓ 成功 - 顶层keys: {keys}, 数据量约: {count}")
+                report['endpoints'][name] = {'status': 'OK', 'keys': keys}
+            elif isinstance(data, list):
+                print(f"    ✓ 成功 - 返回列表, 长度: {len(data)}")
+                report['endpoints'][name] = {'status': 'OK', 'count': len(data)}
+        else:
+            print(f"    ✗ 失败")
+            report['endpoints'][name] = {'status': 'FAILED'}
+
+    # 3. 总结
+    print("\n[3] 诊断总结:")
+    failed = [n for n, r in report['endpoints'].items() if r['status'] == 'FAILED']
+    if not failed:
+        print("    所有端点正常")
+    elif len(failed) == len(endpoints):
+        print("    所有端点失败 → 可能是签名算法变更或 sv 版本不匹配")
+        print(f"    修复建议: 参照 docs/CLS_API_STRATEGY.md 第八章修复指南")
+    else:
+        print(f"    部分端点失败: {failed} → 可能是接口路径变更")
+        print(f"    修复建议: 用浏览器访问对应页面, 通过 browser_network_requests 捕获新API路径")
+
+    print("=" * 60)
+    return report
 
 
 def fetch_cls_pages_via_api(data_quality):
