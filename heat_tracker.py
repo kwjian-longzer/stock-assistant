@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-热点板块热度量化追踪器 v2
+热点板块热度量化追踪器 v3
 
-参考观澜网站设计，用历史数据库数据构建多板块对比热度曲线：
+v3改进:
+  1. 动态板块选择: 扫描全市场110个行业，按资金流绝对值排序取Top6
+  2. EMA平滑: alpha=0.4，消除日间剧烈波动，凸显趋势
+  3. 5日累计资金流: 替代单日资金，趋势更清晰
+  4. 板块连续性: 昨日热门板块若仍在趋势中则保留
+
+参考观澜网站设计:
   - 仅用两个因子：板块资金流向 + 涨停板数量
-  - 数据全部从Tushare数据库获取（2周历史），不依赖自身积累
+  - 数据全部从Tushare数据库获取（20交易日历史）
   - 多个热点板块在同一图表中相对比
   - Y轴: -100 ~ +100（资金流入为正，流出为负）
 
 热度公式:
   H(t) = W1 * 资金流向标准化 + W2 * 涨停密度标准化
+  平滑: H_smooth(t) = alpha * H(t) + (1-alpha) * H_smooth(t-1)
 
   W1 = 0.6（资金流向为主）
   W2 = 0.4（涨停密度为辅）
 
-数据源:
-  - Tushare moneyflow: 按日获取个股资金流向，聚合到行业
-  - Tushare daily / 东方财富涨停池: 涨停个股统计
-
 用法:
   from heat_tracker import compute_sector_heat_comparison
-  result = compute_sector_heat_comparison(pro, stock_basic, sectors_config, days=14)
+  result = compute_sector_heat_comparison(pro, stock_basic, days=28)
 """
 
 import json
@@ -212,21 +215,122 @@ def calculate_sector_heat(net_capital, limit_density):
     return round(heat, 1)
 
 
-def compute_sector_heat_comparison(pro, stock_basic_list, sectors_config, days=14):
+def smooth_series(data, alpha=0.4):
+    """EMA指数移动平均平滑
+
+    alpha越小越平滑。0.4 = 适度平滑，保留趋势方向但消除日间噪声。
+
+    Args:
+        data: 原始数据列表
+        alpha: 平滑系数 (0-1)
+
+    Returns:
+        list: 平滑后的数据
+    """
+    if not data:
+        return data
+    smoothed = [data[0]]
+    for i in range(1, len(data)):
+        smoothed.append(alpha * data[i] + (1 - alpha) * smoothed[-1])
+    # 保留一位小数
+    return [round(x, 1) for x in smoothed]
+
+
+def cumulative_sum(data, window=5):
+    """滑动窗口累计求和
+
+    用于将单日资金流转换为5日累计资金流，趋势更清晰。
+
+    Args:
+        data: 原始数据列表
+        window: 窗口大小
+
+    Returns:
+        list: 累计数据列表（长度与原始相同，前window-1个用部分累计）
+    """
+    result = []
+    for i in range(len(data)):
+        start = max(0, i - window + 1)
+        result.append(sum(data[start:i + 1]))
+    return result
+
+
+def select_dynamic_sectors(daily_capital, daily_limit, trade_dates, top_n=6):
+    """动态选择前线热点板块
+
+    扫描全部行业，按最近交易日资金流绝对值排序取Top N。
+    加入连续性逻辑：如果某板块在3日内有2天进入Top10则优先保留。
+
+    Args:
+        daily_capital: {date: {行业: {net_mf_amount, ...}}}
+        daily_limit: {date: {行业: {limit_up_count, ...}}}
+        trade_dates: 交易日列表
+        top_n: 选取的板块数
+
+    Returns:
+        list: 板块配置列表 [{"name": industry, "industries": [industry]}]
+    """
+    if not trade_dates:
+        return []
+
+    # 统计最近3个交易日各行业进入Top10的次数
+    recent_dates = trade_dates[-3:] if len(trade_dates) >= 3 else trade_dates
+    top10_count = Counter()
+
+    for date in recent_dates:
+        mf = daily_capital.get(date, {})
+        # 按资金流绝对值排序
+        sorted_inds = sorted(
+            mf.items(),
+            key=lambda x: abs(x[1].get('net_mf_amount', 0)),
+            reverse=True
+        )
+        for ind, _ in sorted_inds[:10]:
+            top10_count[ind] += 1
+
+    # 最近一个交易日的资金流排名
+    latest_date = trade_dates[-1]
+    latest_mf = daily_capital.get(latest_date, {})
+    latest_sorted = sorted(
+        latest_mf.items(),
+        key=lambda x: abs(x[1].get('net_mf_amount', 0)),
+        reverse=True
+    )
+
+    # 综合排名：最近日资金流绝对值为主(70%) + 3日Top10出现次数为辅(30%)
+    industry_scores = {}
+    max_capital = max(abs(v.get('net_mf_amount', 0)) for _, v in latest_sorted[:20]) if latest_sorted else 1
+
+    for ind, data in latest_sorted[:20]:
+        capital_score = abs(data.get('net_mf_amount', 0)) / max_capital * 100 if max_capital > 0 else 0
+        consistency_score = top10_count.get(ind, 0) / len(recent_dates) * 100
+        industry_scores[ind] = 0.7 * capital_score + 0.3 * consistency_score
+
+    # 按综合得分排序取Top N
+    selected = sorted(industry_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
+
+    # 构建板块配置（每个行业独立为一个板块）
+    sectors_config = []
+    for ind, score in selected:
+        sectors_config.append({
+            "name": ind,
+            "industries": [ind],
+            "keywords": [],
+        })
+
+    print(f"[INFO] 动态选出 {len(sectors_config)} 个前线热点板块: {[s['name'] for s in sectors_config]}")
+    return sectors_config
+
+
+def compute_sector_heat_comparison(pro, stock_basic_list, sectors_config=None, days=28):
     """计算多板块热度对比（核心函数）
 
-    从Tushare数据库获取2周历史数据，计算多个热点板块的按日热度曲线。
+    v3: 支持动态板块选择 + EMA平滑 + 5日累计资金流
 
     Args:
         pro: Tushare pro_api
         stock_basic_list: 股票基础信息列表
-        sectors_config: 板块配置列表，每个元素:
-            {
-                "name": "AI算力",
-                "industries": ["半导体", "通信设备", ...],  # Tushare行业名
-                "keywords": ["算力", "AI", "光模块"],  # 备用关键词
-                "stock_codes": ["688256.SH", ...],  # 可选: 精确股票列表
-            }
+        sectors_config: 板块配置（None则动态选择）
         days: 获取多少自然日的历史数据
 
     Returns:
@@ -262,7 +366,11 @@ def compute_sector_heat_comparison(pro, stock_basic_list, sectors_config, days=1
 
         print(f"  [{date}] 资金流向: {len(mf)} 个行业, 涨停: {sum(d.get('limit_up_count',0) for d in lim.values())} 只")
 
-    # 4. 按板块配置聚合热度
+    # 4. 动态选择板块（如果未提供配置）
+    if sectors_config is None:
+        sectors_config = select_dynamic_sectors(daily_capital, daily_limit, trade_dates, top_n=6)
+
+    # 5. 按板块配置聚合热度
     sector_results = []
 
     for sec_cfg in sectors_config:
@@ -302,17 +410,25 @@ def compute_sector_heat_comparison(pro, stock_basic_list, sectors_config, days=1
             limit_series.append(limit_density)
             limit_count_series.append(total_limit)
 
-        # 判定生命周期
-        lifecycle = _determine_lifecycle(heat_series, capital_series)
+        # v3: EMA平滑热度曲线
+        heat_series_smooth = smooth_series(heat_series, alpha=0.4)
+
+        # v3: 5日累计资金流（趋势更清晰）
+        capital_cumulative = cumulative_sum(capital_series, window=5)
+
+        # 判定生命周期（用平滑后的数据）
+        lifecycle = _determine_lifecycle(heat_series_smooth, capital_series)
 
         sector_results.append({
             "name": sec_name,
             "industries": sec_industries,
             "trade_dates": trade_dates,
-            "heat_series": heat_series,
-            "capital_series": capital_series,
+            "heat_series": heat_series_smooth,
+            "heat_raw": heat_series,
+            "capital_series": capital_cumulative,
+            "capital_raw": capital_series,
             "limit_series": limit_count_series,
-            "current_heat": heat_series[-1] if heat_series else 0,
+            "current_heat": heat_series_smooth[-1] if heat_series_smooth else 0,
             "lifecycle": lifecycle,
         })
 
@@ -526,10 +642,12 @@ DEFAULT_SECTORS = [
 def generate_heat_report_section(pro=None, stock_basic_list=None, sectors_config=None, days=28):
     """生成热度对比报告段落（供AI报告引用）
 
+    v3: 默认动态选择板块，sectors_config=None时自动扫描前线热点
+
     Args:
         pro: Tushare pro_api
         stock_basic_list: 股票基础信息
-        sectors_config: 板块配置（None则用默认）
+        sectors_config: 板块配置（None则动态选择前线热点）
         days: 历史天数
 
     Returns:
@@ -606,7 +724,9 @@ def export_heat_data_json(output_path=None, pro=None, stock_basic_list=None, sec
         export_data["sectors"].append({
             "name": sec["name"],
             "heat_series": sec["heat_series"],
+            "heat_raw": sec.get("heat_raw", sec["heat_series"]),
             "capital_series": sec["capital_series"],
+            "capital_raw": sec.get("capital_raw", sec["capital_series"]),
             "limit_series": sec["limit_series"],
             "current_heat": sec.get("current_heat", 0),
             "lifecycle": sec.get("lifecycle", {}),

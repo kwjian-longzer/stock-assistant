@@ -356,6 +356,8 @@ def extract_summary_from_report(content):
 def send_summary_via_webhook(file_path):
     """通过 Webhook 发送重要提醒+金股摘要卡片（不发送全文）
 
+    v3.0: 改为发送网站链接+简报卡片，不再发送全文
+
     Args:
         file_path: 报告文件路径
 
@@ -376,18 +378,31 @@ def send_summary_via_webhook(file_path):
 
     # 构造金股推荐文本
     gold_lines = []
-    for i, stock in enumerate(gold_stocks[:10], 1):
+    for i, stock in enumerate(gold_stocks[:3], 1):  # v3.0: 只取Top3金股
         line = f"**{i}. {stock['name']}（{stock['code']}）**"
         if stock['level']:
             line += f" —— {stock['level']}"
         if stock['reason']:
             reason = stock['reason']
-            if len(reason) > 120:
-                reason = reason[:120] + "..."
-            line += f"\n   推荐理由：{reason}"
+            if len(reason) > 80:
+                reason = reason[:80] + "..."
+            line += f"\n   {reason}"
         gold_lines.append(line)
     gold_text = '\n'.join(gold_lines) if gold_lines else "暂无金股推荐"
 
+    # 从文件名提取日期和类型
+    base_name = os.path.basename(file_path)
+    date_str = base_name.split('_')[0] if '_' in base_name else ""
+
+    # v3.0: 网站链接
+    SITE_URL = "https://kwjian-longzer.github.io/stock-assistant/"
+
+    # 提取一句话总结（取重要提醒前150字）
+    one_line_summary = alerts_text.replace('\n', ' ')[:150]
+    if len(alerts_text) > 150:
+        one_line_summary += "..."
+
+    # v3.0: 构造交互卡片（链接+简报模式）
     payload = {
         "msg_type": "interactive",
         "card": {
@@ -403,7 +418,7 @@ def send_summary_via_webhook(file_path):
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": f"**🔔 重要提醒**\n\n{alerts_text}"
+                        "content": f"**📈 一句话总结**\n{one_line_summary}"
                     }
                 },
                 {
@@ -413,18 +428,32 @@ def send_summary_via_webhook(file_path):
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": f"**⭐ 金股推荐**\n\n{gold_text}"
+                        "content": f"**⭐ 金股速览**\n{gold_text}"
                     }
                 },
                 {
                     "tag": "hr"
                 },
                 {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {
+                                "tag": "plain_text",
+                                "content": "🔗 点击查看完整报告"
+                            },
+                            "url": SITE_URL,
+                            "type": "primary"
+                        }
+                    ]
+                },
+                {
                     "tag": "note",
                     "elements": [
                         {
                             "tag": "plain_text",
-                            "content": "完整报告见附件文件"
+                            "content": f"数据更新: {date_str} | 完整数据可视化见网站"
                         }
                     ]
                 }
@@ -441,7 +470,7 @@ def send_summary_via_webhook(file_path):
         resp = requests.post(webhook, json=payload, timeout=30)
         result = resp.json()
         if result.get("code") == 0:
-            print(f"[OK] Webhook摘要推送成功（重要提醒+{len(gold_stocks)}只金股）")
+            print(f"[OK] Webhook推送成功（链接+简报+{len(gold_stocks[:3])}只金股）")
             return True
         else:
             print(f"[WARN] Webhook发送失败: {result}")
@@ -687,7 +716,7 @@ def git_commit_and_push(report_path):
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     print(f"\n{'='*60}")
-    print("  [步骤3] Git 提交报告与数据到仓库")
+    print("  [步骤5] Git 提交报告与数据到仓库")
     print(f"{'='*60}")
 
     # 确保在项目根目录执行 git 命令
@@ -760,6 +789,19 @@ def git_commit_and_push(report_path):
         for fname in os.listdir(archive_dir):
             if fname.endswith('.json'):
                 files_to_add.append(os.path.join(archive_dir, fname))
+
+    # 6. v3.0: 网站数据目录（docs/data/）
+    docs_data_dir = os.path.join(script_dir, "docs", "data")
+    if os.path.isdir(docs_data_dir):
+        for root, dirs, files in os.walk(docs_data_dir):
+            for fname in files:
+                if fname.endswith('.json'):
+                    files_to_add.append(os.path.join(root, fname))
+
+    # 7. v3.0: 热度数据文件
+    heat_data_path = os.path.join(script_dir, "data", "heat_data.json")
+    if os.path.exists(heat_data_path):
+        files_to_add.append(heat_data_path)
 
     if not files_to_add:
         print("  [SKIP] 没有需要提交的文件")
@@ -881,7 +923,28 @@ def push_to_feishu(file_path):
     print(f"\n[步骤2] 通过Webhook发送重要提醒+金股摘要...")
     webhook_sent = send_summary_via_webhook(file_path)
 
-    # --- 步骤3: Git 提交报告与数据到仓库 ---
+    # --- 步骤3: v3.0 网站数据生成 ---
+    print(f"\n[步骤3] 生成网站数据...")
+    site_ok = False
+    try:
+        import site_builder
+        site_builder.main()
+        site_ok = True
+        print("[OK] 网站数据已生成")
+    except Exception as e:
+        print(f"[WARN] 网站数据生成失败: {e}")
+
+    # --- 步骤4: v3.0 金股回测 ---
+    if site_ok:
+        print(f"\n[步骤4] 运行金股回测...")
+        try:
+            import gold_stock_backtest
+            gold_stock_backtest.run_backtest()
+            print("[OK] 金股回测完成")
+        except Exception as e:
+            print(f"[WARN] 金股回测失败: {e}")
+
+    # --- 步骤5: Git 提交报告与数据到仓库 ---
     git_ok = git_commit_and_push(file_path)
 
     # --- 汇总 ---

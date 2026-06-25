@@ -1,0 +1,154 @@
+{
+  "summary": {
+    "total": 12,
+    "win_rate": 0.583,
+    "avg_return": 4.32,
+    "avg_max_draw": -3.86
+  },
+  "stocks": [
+    {
+      "name": "万丰奥威",
+      "code": "002085",
+      "first_date": "2026-05-21",
+      "count": 4,
+      "ret_1d": 3.21,
+      "ret_3d": 7.85,
+      "ret_5d": 12.4,
+      "max_gain": 18.62,
+      "max_draw": -2.31,
+      "reason": "低空经济+业绩+资金共振"
+    },
+    {
+      "name": "兆易创新",
+      "code": "603986",
+      "first_date": "2026-06-12",
+      "count": 2,
+      "ret_1d": 9.98,
+      "ret_3d": 15.23,
+      "ret_5d": 21.07,
+      "max_gain": 24.5,
+      "max_draw": -1.05,
+      "reason": "存储芯片龙头+美光催化+机构净买28亿"
+    },
+    {
+      "name": "长电科技",
+      "code": "600584",
+      "first_date": "2026-06-18",
+      "count": 1,
+      "ret_1d": 10.02,
+      "ret_3d": 8.74,
+      "ret_5d": 6.31,
+      "max_gain": 12.88,
+      "max_draw": -3.42,
+      "reason": "先进封装+AI算力链+龙虎榜机构+41亿"
+    },
+    {
+      "name": "聚辰股份",
+      "code": "688123",
+      "first_date": "2026-06-18",
+      "count": 1,
+      "ret_1d": 20.0,
+      "ret_3d": 26.51,
+      "ret_5d": 19.74,
+      "max_gain": 31.2,
+      "max_draw": -5.18,
+      "reason": "存储芯片+科创板20cm+机构净买17亿"
+    },
+    {
+      "name": "德明利",
+      "code": "001269",
+      "first_date": "2026-06-18",
+      "count": 1,
+      "ret_1d": 10.01,
+      "ret_3d": 22.36,
+      "ret_5d": 28.9,
+      "max_gain": 33.45,
+      "max_draw": -4.2,
+      "reason": "存储模组+机构净买24亿+换手暴增"
+    },
+    {
+      "name": "烽火通信",
+      "code": "600498",
+      "first_date": "2026-06-10",
+      "count": 2,
+      "ret_1d": 1.85,
+      "ret_3d": -2.1,
+      "ret_5d": 3.42,
+      "max_gain": 6.78,
+      "max_draw": -7.32,
+      "reason": "光通信+光纤+芯片多维催化"
+    },
+    {
+      "name": "三环集团",
+      "code": "300408",
+      "first_date": "2026-06-05",
+      "count": 1,
+      "ret_1d": 4.32,
+      "ret_3d": 9.18,
+      "ret_5d": 5.61,
+      "max_gain": 13.25,
+      "max_draw": -3.88,
+      "reason": "电子陶瓷+AI半导体设备扩散"
+    },
+    {
+      "name": "苏州固锝",
+      "code": "002079",
+      "first_date": "2026-06-12",
+      "count": 1,
+      "ret_1d": 3.52,
+      "ret_3d": 6.41,
+      "ret_5d": 4.18,
+      "max_gain": 9.87,
+      "max_draw": -2.95,
+      "reason": "半导体二极管+龙虎榜+氦气逻辑"
+    },
+    {
+      "name": "新易盛",
+      "code": "300502",
+      "first_date": "2026-05-28",
+      "count": 3,
+      "ret_1d": -1.2,
+      "ret_3d": 2.15,
+      "ret_5d": -3.4,
+      "max_gain": 5.62,
+      "max_draw": -8.74,
+      "reason": "光模块+业绩见顶分歧"
+    },
+    {
+      "name": "中际旭创",
+      "code": "300308",
+      "first_date": "2026-06-05",
+      "count": 1,
+      "ret_1d": 2.18,
+      "ret_3d": 4.92,
+      "ret_5d": 1.3,
+      "max_gain": 7.45,
+      "max_draw": -4.12,
+      "reason": "光模块龙头+存储+MLCC催化"
+    },
+    {
+      "name": "江海股份",
+      "code": "002484",
+      "first_date": "2026-06-12",
+      "count": 1,
+      "ret_1d": 10.0,
+      "ret_3d": 7.85,
+      "ret_5d": 11.23,
+      "max_gain": 15.67,
+      "max_draw": -2.88,
+      "reason": "铝电解电容涨价+服务器电源订单"
+    },
+    {
+      "name": "拓荆科技",
+      "code": "688072",
+      "first_date": "2026-06-10",
+      "count": 1,
+      "ret_1d": 5.62,
+      "ret_3d": 8.91,
+      "ret_5d": 12.45,
+      "max_gain": 16.78,
+      "max_draw": -3.55,
+      "reason": "半导体设备+晶圆厂扩产+机构调研"
+    }
+  ]
+}

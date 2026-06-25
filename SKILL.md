@@ -1,6 +1,7 @@
-# 股票助手技能文件（强化版）
+# 股票助手技能文件（v3.0 网站化版）
 
 > **本文件是项目的"宪法"，每次自动化任务执行时必须首先读取并严格遵守。**
+> v3.0: 项目从纯Markdown报告模式升级为动态网站。GitHub Pages托管，飞书只推链接+简报。
 > 违反本文件中任何"红线"规则的行为都是不可接受的。
 
 ---
@@ -26,23 +27,37 @@ stock-assistant/
 ├── validate_report.py    # 报告校验 - v2.0: 12条红线(含热点追踪/龙脉定位/推理链/交叉验证/热度曲线/金股汇总表)
 ├── report_quality_evaluator.py  # v2.0质量评分系统 - 10维度×10分=100分
 ├── vip_extractor.py     # v3.0 VIP信息结构化提取器（搜索式发现: stock_company主营业务全文搜索）
-├── heat_tracker.py      # v3.0 热度量化追踪器（多板块对比: 资金流向60%+涨停密度40%，2周历史数据，不依赖自身积累）
-├── push_feishu.py        # 飞书推送 - 推送MD文件+重要提醒+金股摘要到飞书群机器人
+├── heat_tracker.py      # v3.0 热度量化追踪器（动态选板块+EMA平滑+5日累计资金流）
+├── site_builder.py      # v3.0 网站数据生成 - 将报告+数据转为JSON供GitHub Pages网站使用
+├── gold_stock_backtest.py  # v3.0 金股回测 - 追踪历史金股推荐后1/3/5/10/20日收益
+├── push_feishu.py        # 飞书推送 - v3.0: 推送链接+简报卡片(不再推全文MD)
 ├── config.json           # 持久化配置 - 飞书Webhook等（自动化任务可读取）
-├── data/                 # 数据目录（v2.0: data_summary.json和qian_sanqiang_results.json纳入git）
-│   ├── raw_data_*.json   # 原始采集数据（24万行+，AI不应直接读取，gitignore排除）
-│   ├── raw_data_latest.json  # 最新原始数据软链接（gitignore排除）
-│   ├── qian_sanqiang_results.json  # 钱三强选股结果（三强合一+共振分析）✅纳入git
+├── data/                 # 数据目录
+│   ├── raw_data_*.json   # 原始采集数据（gitignore排除）
 │   ├── data_summary.json # 数据摘要（AI写报告的唯一数据来源）✅纳入git
-│   └── cls_telegraph_archive/  # v2.0: 电报增量归档 ✅纳入git（跨任务共享）
-│       └── YYYY-MM-DD.json    # 当日电报全量（去重合并）
-└── reports/              # 报告输出目录（v2.0: ✅纳入git，自动commit+push）
-    └── YYYY-MM-DD_晨报/午报/晚报.md
+│   ├── heat_data.json   # v3.0 热度数据JSON（供网站ECharts）✅纳入git
+│   ├── qian_sanqiang_results.json  # 钱三强选股结果 ✅纳入git
+│   └── cls_telegraph_archive/  # 电报增量归档 ✅纳入git
+├── reports/              # 报告输出目录 ✅纳入git
+│   └── YYYY-MM-DD_晨报/午报/晚报.md
+├── docs/                 # v3.0 GitHub Pages 网站根目录 ✅纳入git
+│   ├── index.html       # SPA入口（7页面: 看板/归档/热度/金股/信源/选股/日历）
+│   ├── assets/          # JS/CSS（app.js, charts.js, styles.css）
+│   ├── _shared/js/      # ECharts库
+│   └── data/            # 网站数据JSON（自动生成）
+│       ├── manifest.json     # 总索引
+│       ├── latest.json       # 最新快照
+│       ├── archive/          # 按日期归档
+│       │   └── YYYY-MM-DD_type.json
+│       └── history/          # 跨日期累积
+│           ├── gold_stocks.json  # 金股历史+回测
+│           └── heat_tracking.json  # 热度趋势(30日滚动)
+└── documentation/        # 项目文档（非网站）
 ```
 
 ---
 
-## 三、执行流程（六步，不可跳过）
+## 三、执行流程（v3.0: 七步，不可跳过）
 
 ```
 步骤0:   git clone（拉取最新代码）
@@ -53,48 +68,56 @@ stock-assistant/
          → API采集失败时降级到浏览器采集（保存到 data/cls_pages.json）
          → 电报由fetch_data.py通过API直接获取，无需浏览器
          → CLS API故障时：运行 python -c "from fetch_data import cls_api_diagnostic; cls_api_diagnostic()" 诊断
-         → 参照 docs/CLS_API_STRATEGY.md 第八章 Agent自修复指南 修复
 
-步骤1:   python fetch_data.py [morning|noon|evening|weekly]
+步骤1:   python fetch_data.py [morning|noon|evening|weekly_sat|weekly_sun]
          → 生成 data/raw_data_YYYYMMDD_mode.json + data/raw_data_latest.json
-         → 包含财联社电报（API）+ 财联社页面（读取cls_pages.json）
          → 自动运行钱三强选股，生成 data/qian_sanqiang_results.json
-         → v2.0: 电报采集后自动归档到 data/cls_telegraph_archive/YYYY-MM-DD.json（增量去重）
-         → v3.0: VIP文章分页采集（5页），去重后50+篇，保留related_stock板块约束字段
-         → v2.0: weekly模式不采集实时数据，读取本周报告+电报归档+数据摘要，生成raw_data_weekly.json
+         → VIP文章分页采集（5页），50+篇
+         → weekly_sat=周六复盘, weekly_sun=周日展望
 
 步骤2:   python extract_summary.py
          → 读取 raw_data_latest.json + qian_sanqiang_results.json
          → 生成 data/data_summary.json
-         → 包含第零章: 财联社信源扫描（chapter0_cls）
-         → 包含钱三强选股共振分析（chapter_qsq）
 
-步骤3:   读取 data/data_summary.json + analysis_prompt.md，撰写报告
+步骤3:   python heat_tracker.py（生成热度数据）
+         → 导出 data/heat_data.json（动态选板块+EMA平滑+20交易日）
+
+步骤4:   读取 data/data_summary.json + analysis_prompt.md，撰写报告
          → 保存到 reports/YYYY-MM-DD_报告类型.md
          → 报告中每个数字必须来自 data_summary.json
-         → 必须包含第零章: 财联社信源扫描与信号提取
 
-步骤4:   python validate_report.py --report reports/YYYY-MM-DD_报告类型.md --summary data/data_summary.json
-         → v2.0校验包含12条红线：占位符/指数一致性/涨跌幅/股票代码/最小长度/章节结构(含第零章)/热点生命周期/金股龙脉定位/推理链完整性/交叉验证密度/时间-热度曲线/金股结构化汇总表
-         → 校验失败则必须修复报告后重新校验，直到通过
+步骤5:   python validate_report.py --report reports/YYYY-MM-DD_报告类型.md --summary data/data_summary.json
+         → 12条红线校验
+         → python report_quality_evaluator.py 质量评分(目标≥80分)
 
-步骤4.5: python report_quality_evaluator.py --report reports/YYYY-MM-DD_报告类型.md --summary data/data_summary.json
-         → v2.0质量评分系统：10维度×10分=100分
-         → 评分维度：数据真实性/信号提取深度/热点识别/热点生命周期/推理链/金股多维验证/金股龙脉定位/交叉验证密度/文本质量/结构完整性
-         → 目标分数≥80分(B级以上)，低于70分需重新撰写
-         → 评分结果存入 data/report_scores/ 供迭代对比
+步骤6:   python push_feishu.py --file reports/YYYY-MM-DD_报告类型.md
+         → v3.0推送流程（5步）：
+           [步骤1] Open API发送报告MD文件到飞书群（保留文件推送）
+           [步骤2] Webhook发送交互卡片：一句话总结+Top3金股+网站链接按钮
+           [步骤3] 运行 site_builder.py → 生成 docs/data/*.json（网站数据）
+           [步骤4] 运行 gold_stock_backtest.py → 更新金股回测数据
+           [步骤5] Git commit + push（报告+数据+网站数据自动提交）
+         → GitHub Pages 自动部署（push后1-2分钟网站更新）
+         → 飞书推送内容：链接+简报，不再推全文
 
-步骤5:   python push_feishu.py --file reports/YYYY-MM-DD_报告类型.md
-         → 校验+评分通过后才允许推送
-         → 推送方式：MD文件（Open API）+ 重要提醒+金股摘要（Webhook）
-         → 不发送全文，文字内容仅含重要提醒和金股推荐
-         → 自动生成钱三强选股结果MD文件 + VIP信息表MD文件，与报告MD一起发送
-         → **推送后自动 git commit + push 报告MD、数据摘要、钱三强选股结果、电报归档、VIP信息表到GitHub**
-
-步骤6:   git add -A && git commit -m "..." && git push origin main
-         → **仅用于代码文件修改的提交**（报告和数据已在步骤5自动提交）
-         → 如果执行过程中修改了任何代码文件（.py/.md），必须commit并push到GitHub
+步骤7:   git add -A && git commit -m "..." && git push origin main
+         → **仅用于代码文件修改的提交**（报告和数据已在步骤6自动提交）
 ```
+
+### v3.0 网站架构说明
+
+网站地址: https://kwjian-longzer.github.io/stock-assistant/
+托管方式: GitHub Pages（从 main 分支 /docs 目录提供服务）
+部署: git push 后自动更新，无需CI/CD
+
+7个页面:
+1. 今日看板 - 指数温度计+板块热度+金股速览
+2. 日报归档 - 日期选择器+Markdown报告渲染（晨/午/晚/周六复盘/周日展望）
+3. 板块热度 - ECharts曲线图(热度对比/资金流/涨停数)+生命周期卡片
+4. 金股追踪 - 历史金股表+回测收益(1/3/5/10/20日)+胜率统计
+5. 财联社信源 - VIP文章+电报精华+股票发现表
+6. 钱三强选股 - 选股结果卡片+历史表现
+7. 投资日历 - 月历视图+事件卡片
 
 ---
 

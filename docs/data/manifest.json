@@ -1,0 +1,42 @@
+{
+  "latest_date": "2026-06-25",
+  "latest_type": "evening",
+  "updated_at": "2026-06-25 20:00:00",
+  "archives": [
+    {
+      "date": "2026-06-25",
+      "type": "morning",
+      "title": "多维市场研报（晨报）"
+    },
+    {
+      "date": "2026-06-25",
+      "type": "noon",
+      "title": "多维市场研报（午报）"
+    },
+    {
+      "date": "2026-06-25",
+      "type": "evening",
+      "title": "多维市场研报（晚报）"
+    },
+    {
+      "date": "2026-06-24",
+      "type": "evening",
+      "title": "多维市场研报（晚报）"
+    },
+    {
+      "date": "2026-06-23",
+      "type": "evening",
+      "title": "多维市场研报（晚报）"
+    },
+    {
+      "date": "2026-06-22",
+      "type": "saturday",
+      "title": "周六复盘"
+    },
+    {
+      "date": "2026-06-21",
+      "type": "sunday",
+      "title": "周日展望"
+    }
+  ]
+}

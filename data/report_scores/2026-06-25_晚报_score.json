@@ -1,0 +1,74 @@
+{
+  "total_score": 90,
+  "max_score": 100,
+  "percentage": 90.0,
+  "scores": {
+    "data_truth": {
+      "name": "数据真实性",
+      "score": 10,
+      "weight": 10,
+      "issues": []
+    },
+    "signal_depth": {
+      "name": "信号提取深度",
+      "score": 3,
+      "weight": 10,
+      "issues": [
+        "缺少影响方向判断"
+      ]
+    },
+    "hotspot_id": {
+      "name": "热点识别精度",
+      "score": 7,
+      "weight": 10,
+      "issues": [
+        "未明确编号热点(3-5个)"
+      ]
+    },
+    "hotspot_cycle": {
+      "name": "热点生命周期",
+      "score": 10,
+      "weight": 10,
+      "issues": []
+    },
+    "reasoning_chain": {
+      "name": "推理链完整性",
+      "score": 10,
+      "weight": 10,
+      "issues": []
+    },
+    "gold_multi": {
+      "name": "金股多维验证",
+      "score": 10,
+      "weight": 10,
+      "issues": []
+    },
+    "gold_dragon": {
+      "name": "金股龙脉定位",
+      "score": 10,
+      "weight": 10,
+      "issues": []
+    },
+    "cross_density": {
+      "name": "交叉验证密度",
+      "score": 10,
+      "weight": 10,
+      "issues": []
+    },
+    "text_quality": {
+      "name": "文本质量",
+      "score": 10,
+      "weight": 10,
+      "issues": []
+    },
+    "structure": {
+      "name": "结构完整性",
+      "score": 10,
+      "weight": 10,
+      "issues": []
+    }
+  },
+  "char_count": 13494,
+  "report_name": "2026-06-25_晚报.md",
+  "eval_time": "2026-06-25 16:09:16"
+}
