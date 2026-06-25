@@ -1518,6 +1518,25 @@ def main():
 
     print(f"最新副本: {latest_file}")
 
+    # ===================================================================
+    # 钱三强选股（量化选股，生成共振分析数据）
+    # ===================================================================
+    print("\n=== 钱三强选股 ===")
+    try:
+        from qian_sanqiang_selector import QianSanQiangSelector, display_results
+        selector = QianSanQiangSelector()
+        qsq_df, qsq_date, qsq_mf_date = selector.run()
+        qsq_output = display_results(qsq_df, qsq_date, qsq_mf_date)
+
+        qsq_path = os.path.join(data_dir, "qian_sanqiang_results.json")
+        with open(qsq_path, 'w', encoding='utf-8') as f:
+            json.dump(qsq_output, f, ensure_ascii=False, indent=2, default=str)
+        print(f"[OK] 钱三强选股结果已保存: {qsq_path}")
+    except Exception as e:
+        print(f"[WARN] 钱三强选股失败: {e}")
+        import traceback
+        traceback.print_exc()
+
     return filename
 
 

@@ -20,14 +20,16 @@
 stock-assistant/
 ├── SKILL.md              # 本文件 - 项目宪法，红线规则，历史教训
 ├── analysis_prompt.md    # 深度分析提示词 - 报告写作规范
-├── fetch_data.py         # 数据采集 - 从Tushare/新浪/媒体网站获取原始数据
+├── fetch_data.py         # 数据采集 - 从Tushare/新浪/媒体网站获取原始数据 + 钱三强选股
+├── qian_sanqiang_selector.py  # 钱三强选股公式 - 量化选股引擎（EMA趋势+换手率+资金共振）
 ├── extract_summary.py    # 数据摘要 - 从原始数据提取精炼摘要（AI写报告的唯一数据来源）
 ├── validate_report.py    # 报告校验 - 校验报告数据真实性和质量
-├── push_feishu.py        # 飞书推送 - 推送报告到飞书群机器人
+├── push_feishu.py        # 飞书推送 - 推送MD文件+重要提醒+金股摘要到飞书群机器人
 ├── config.json           # 持久化配置 - 飞书Webhook等（自动化任务可读取）
 ├── data/                 # 数据目录
 │   ├── raw_data_*.json   # 原始采集数据（24万行+，AI不应直接读取）
 │   ├── raw_data_latest.json  # 最新原始数据软链接
+│   ├── qian_sanqiang_results.json  # 钱三强选股结果（三强合一+共振分析）
 │   └── data_summary.json # 数据摘要（AI写报告的唯一数据来源）
 └── reports/              # 报告输出目录
     └── YYYY-MM-DD_晨报/午报/晚报.md
@@ -49,10 +51,13 @@ stock-assistant/
 步骤1:   python fetch_data.py [morning|noon|evening]
          → 生成 data/raw_data_YYYYMMDD_mode.json + data/raw_data_latest.json
          → 包含财联社电报（API）+ 财联社页面（读取cls_pages.json）
+         → 自动运行钱三强选股，生成 data/qian_sanqiang_results.json
 
 步骤2:   python extract_summary.py
-         → 读取 raw_data_latest.json，生成 data/data_summary.json
+         → 读取 raw_data_latest.json + qian_sanqiang_results.json
+         → 生成 data/data_summary.json
          → 包含第零章: 财联社信源扫描（chapter0_cls）
+         → 包含钱三强选股共振分析（chapter_qsq）
 
 步骤3:   读取 data/data_summary.json + analysis_prompt.md，撰写报告
          → 保存到 reports/YYYY-MM-DD_报告类型.md
@@ -65,6 +70,8 @@ stock-assistant/
 
 步骤5:   python push_feishu.py --file reports/YYYY-MM-DD_报告类型.md
          → 校验通过后才允许推送
+         → 推送方式：MD文件（Open API）+ 重要提醒+金股摘要（Webhook）
+         → 不发送全文，文字内容仅含重要提醒和金股推荐
 ```
 
 ---

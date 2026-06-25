@@ -934,6 +934,187 @@ def extract_chapter6(data):
 
 
 # ---------------------------------------------------------------------------
+# 钱三强选股共振分析
+# ---------------------------------------------------------------------------
+
+def extract_chapter_qsq(data):
+    """提取钱三强选股结果并生成共振分析数据
+
+    读取 data/qian_sanqiang_results.json，对选出的股票与财联社电报、龙虎榜、
+    涨停列表、资金流向进行多源交叉验证，生成共振分析数据。
+
+    共振维度（共4项）:
+      - in_cls_telegraph: 是否出现在财联社电报热门股票中（按名称匹配）
+      - in_top_list: 是否出现在龙虎榜（按 ts_code 匹配）
+      - in_limit_up: 是否在涨停列表中（兼容 list/dict 两种格式）
+      - in_moneyflow_positive: 资金流向是否净流入（net_mf_amount > 0）
+      - resonance_count: 以上4项中满足几项
+    """
+    qsq_file = os.path.join(DATA_DIR, "qian_sanqiang_results.json")
+
+    # 文件不存在时优雅返回
+    if not os.path.isfile(qsq_file):
+        return {"chapter_qsq": "数据暂缺"}
+
+    try:
+        with open(qsq_file, "r", encoding="utf-8") as f:
+            qsq_data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[WARN] 读取钱三强结果失败: {e}")
+        return {"chapter_qsq": "数据暂缺"}
+
+    # --- 构建交叉验证索引 ---
+    # 1. 财联社电报热门股票（stocks 字段为股票名称列表，按名称匹配）
+    cls_telegraph = data.get("cls_telegraph", {})
+    cls_stock_names = set()
+    if isinstance(cls_telegraph, dict):
+        items = cls_telegraph.get("items", [])
+        if isinstance(items, list):
+            for it in items:
+                stocks = it.get("stocks", [])
+                if isinstance(stocks, list):
+                    for s in stocks:
+                        if s:
+                            cls_stock_names.add(s)
+
+    # 2. 龙虎榜股票（按 ts_code 匹配）
+    top_list = data.get("top_list", [])
+    top_list_codes = set()
+    if isinstance(top_list, list):
+        for item in top_list:
+            ts_code = item.get("ts_code", "")
+            if ts_code:
+                top_list_codes.add(ts_code)
+
+    # 3. 涨停列表（兼容 list 和 dict 两种格式）
+    limit_list = data.get("limit_list", [])
+    limit_up_codes = set()
+    if isinstance(limit_list, list):
+        for item in limit_list:
+            # 仅统计涨停（limit == 'U'）；若无 limit 字段则全部计入
+            if item.get("limit") in ("U", None, ""):
+                ts_code = item.get("ts_code", "")
+                if ts_code:
+                    limit_up_codes.add(ts_code)
+    elif isinstance(limit_list, dict):
+        # 降级格式: limit_up_sample 中 ts_code 无交易所后缀
+        for item in limit_list.get("limit_up_sample", []):
+            ts_code = item.get("ts_code", "")
+            if ts_code:
+                limit_up_codes.add(ts_code)
+
+    # 4. 资金流向净流入（按 ts_code 匹配，net_mf_amount > 0）
+    moneyflow = data.get("moneyflow", [])
+    moneyflow_positive_codes = set()
+    if isinstance(moneyflow, list):
+        for item in moneyflow:
+            if safe_float(item.get("net_mf_amount", 0)) > 0:
+                ts_code = item.get("ts_code", "")
+                if ts_code:
+                    moneyflow_positive_codes.add(ts_code)
+
+    # --- 共振分析辅助函数 ---
+    def _normalize_code(ts_code):
+        """提取 ts_code 的数字部分（去掉交易所后缀 .SH/.SZ）"""
+        if not ts_code:
+            return ""
+        return ts_code.split(".")[0]
+
+    # 预构建数字部分索引，兼容有无后缀两种情况
+    top_list_codes_num = {_normalize_code(c) for c in top_list_codes}
+    limit_up_codes_num = {_normalize_code(c) for c in limit_up_codes}
+    moneyflow_positive_codes_num = {
+        _normalize_code(c) for c in moneyflow_positive_codes
+    }
+
+    def _analyze_resonance(stock):
+        ts_code = stock.get("ts_code", "")
+        name = stock.get("name", "")
+        code_num = _normalize_code(ts_code)
+
+        in_cls = bool(name) and name in cls_stock_names
+        in_top = (ts_code in top_list_codes) or (code_num in top_list_codes_num)
+        in_limit = (ts_code in limit_up_codes) or (code_num in limit_up_codes_num)
+        in_money = (
+            (ts_code in moneyflow_positive_codes)
+            or (code_num in moneyflow_positive_codes_num)
+        )
+
+        count = sum([in_cls, in_top, in_limit, in_money])
+
+        return {
+            "in_cls_telegraph": in_cls,
+            "in_top_list": in_top,
+            "in_limit_up": in_limit,
+            "in_moneyflow_positive": in_money,
+            "resonance_count": count,
+        }
+
+    # --- 处理三强合一股票（取前20只）---
+    selected_stocks = qsq_data.get("selected_stocks", [])[:20]
+    selected_result = []
+    for stock in selected_stocks:
+        entry = dict(stock)
+        entry.update(_analyze_resonance(stock))
+        selected_result.append(entry)
+
+    # --- 处理两强股票（取前30只）---
+    two_of_three = qsq_data.get("two_of_three_stocks", [])[:30]
+    two_of_three_result = []
+    for stock in two_of_three:
+        entry = dict(stock)
+        entry.update(_analyze_resonance(stock))
+        two_of_three_result.append(entry)
+
+    # --- 统计汇总 ---
+    qsq_summary = qsq_data.get("summary", {})
+    summary_stats = {
+        "three_strong_count": len(selected_stocks),
+        "two_of_three_count": len(two_of_three),
+        "raw_summary": qsq_summary,
+        "three_strong_pass_cls": sum(
+            1 for s in selected_result if s["in_cls_telegraph"]),
+        "three_strong_pass_top_list": sum(
+            1 for s in selected_result if s["in_top_list"]),
+        "three_strong_pass_limit_up": sum(
+            1 for s in selected_result if s["in_limit_up"]),
+        "three_strong_pass_moneyflow": sum(
+            1 for s in selected_result if s["in_moneyflow_positive"]),
+        "two_of_three_pass_cls": sum(
+            1 for s in two_of_three_result if s["in_cls_telegraph"]),
+        "two_of_three_pass_top_list": sum(
+            1 for s in two_of_three_result if s["in_top_list"]),
+        "two_of_three_pass_limit_up": sum(
+            1 for s in two_of_three_result if s["in_limit_up"]),
+        "two_of_three_pass_moneyflow": sum(
+            1 for s in two_of_three_result if s["in_moneyflow_positive"]),
+    }
+
+    # --- 行业统计（按选出股票数量取前10）---
+    industry_counter = Counter()
+    for stock in selected_stocks:
+        industry = stock.get("industry", "")
+        if industry:
+            industry_counter[industry] += 1
+    top_industries = [
+        {"industry": ind, "count": cnt}
+        for ind, cnt in industry_counter.most_common(10)
+    ]
+
+    return {
+        "chapter_qsq": {
+            "trade_date": qsq_data.get("trade_date", "数据暂缺"),
+            "selected_stocks": selected_result,
+            "two_of_three_stocks": two_of_three_result,
+            "summary": summary_stats,
+            "top_industries": top_industries,
+            "note": "钱三强选股共振分析: 对选出股票与财联社电报/龙虎榜/涨停列表/资金流向进行交叉验证",
+            "source": "qian_sanqiang_results.json + raw_data 交叉验证",
+        }
+    }
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 
@@ -1015,10 +1196,14 @@ def main():
     print("  [5/5] 提取第六章: 数据质量报告...")
     summary.update(extract_chapter6(data))
 
+    # 钱三强选股结果（共振分析）
+    print("  [5.5/7] 提取钱三强选股结果...")
+    summary.update(extract_chapter_qsq(data))
+
     # 第五章说明: 直接引用前面各章数据
     summary["chapter5"] = {
-        "note": "第五章（行业板块分析）直接引用 chapter3 的资金流向行业汇总数据",
-        "data_reference": "chapter3.moneyflow_aggregate.top_net_inflow_industries / top_net_outflow_industries",
+        "note": "第五章（次日策略预判与金股）引用 chapter3 资金流向 + chapter_qsq 钱三强选股共振分析",
+        "data_reference": "chapter3.moneyflow_aggregate + chapter_qsq.selected_stocks + chapter_qsq.two_of_three_stocks",
     }
 
     # 确定输出文件

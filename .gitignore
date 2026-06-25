@@ -3,5 +3,6 @@ __pycache__/
 data/raw_data_*.json
 data/data_summary.json
 data/cls_pages.json
+data/qian_sanqiang_results.json
 reports/*.md
 config.json

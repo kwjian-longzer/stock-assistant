@@ -3,8 +3,8 @@
 """
 飞书推送脚本
 支持两种推送方式：
-  1. Webhook：发送文本内容卡片（快速预览）
-  2. Open API：上传文件并发送文件消息（完整报告文件）
+  1. Open API：上传文件并发送文件消息（完整报告文件）
+  2. Webhook：发送重要提醒+金股摘要卡片（不发送全文）
 
 Open API 流程：
   获取 tenant_access_token → 上传文件获取 file_key → 发送文件消息到群聊
@@ -13,6 +13,7 @@ Open API 流程：
 import sys
 import os
 import json
+import re
 import argparse
 import requests
 
@@ -273,24 +274,118 @@ def send_file_message(token, chat_id, file_key):
         return False
 
 
-def send_text_card_via_webhook(file_path):
-    """通过 Webhook 发送文本内容卡片（快速预览）
-    
+def extract_summary_from_report(content):
+    """从报告MD内容中提取重要提醒和金股
+
+    Args:
+        content: 报告MD文本内容
+
+    Returns:
+        tuple: (title, alerts_text, gold_stocks)
+            - title: 报告标题
+            - alerts_text: 重要提醒文本（最多500字）
+            - gold_stocks: 金股列表，每个元素为 dict(name, code, level, reason)
+    """
+    lines = content.split('\n')
+    title = ""
+    alerts = []
+    gold_stocks = []
+    current_section = ""
+    current_gold = None
+
+    for line in lines:
+        line_stripped = line.strip()
+
+        # 提取标题（第一个 # 开头的行）
+        if line_stripped.startswith('#') and not title:
+            title = line_stripped.lstrip('#').strip()
+
+        # 识别章节
+        if '第零章' in line or '重要提醒' in line or '风险提示' in line:
+            current_section = "alert"
+        elif '金股' in line or '第五章' in line:
+            current_section = "gold"
+        elif line_stripped.startswith('##') or line_stripped.startswith('###'):
+            current_section = ""
+
+        # 收集重要提醒内容
+        if current_section == "alert" and line_stripped and not line_stripped.startswith('#'):
+            alerts.append(line_stripped)
+
+        # 收集金股内容（结构化解析）
+        if current_section == "gold":
+            # 匹配金股标题：#### 金股一：领益智造（002600.SZ）—— 强推荐
+            gold_header_match = re.match(
+                r'^#{1,6}\s*金股[一二三四五六七八九十\d]+\s*[：:]\s*(.+?)[（(](.+?)[）)]',
+                line_stripped
+            )
+            if gold_header_match:
+                if current_gold:
+                    gold_stocks.append(current_gold)
+                level = ""
+                level_match = re.search(r'[—\-]+\s*(.+)$', line_stripped)
+                if level_match:
+                    level = level_match.group(1).strip()
+                current_gold = {
+                    "name": gold_header_match.group(1).strip(),
+                    "code": gold_header_match.group(2).strip(),
+                    "level": level,
+                    "reason": "",
+                }
+            elif current_gold and ('推理链' in line_stripped or '推荐理由' in line_stripped):
+                reason = re.sub(
+                    r'^\*{0,2}\s*(?:推理链|推荐理由)\s*[：:]\s*\*{0,2}',
+                    '',
+                    line_stripped
+                ).strip()
+                if reason:
+                    current_gold["reason"] = reason
+
+    if current_gold:
+        gold_stocks.append(current_gold)
+
+    # 拼接重要提醒文本，限制500字
+    alerts_text = '\n'.join(alerts[:20])
+    if len(alerts_text) > 500:
+        alerts_text = alerts_text[:500] + "..."
+
+    return title, alerts_text, gold_stocks
+
+
+def send_summary_via_webhook(file_path):
+    """通过 Webhook 发送重要提醒+金股摘要卡片（不发送全文）
+
     Args:
         file_path: 报告文件路径
-        
+
     Returns:
         bool: 是否发送成功
     """
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    filename = os.path.basename(file_path)
-    title = filename.replace('.md', '')
+    title, alerts_text, gold_stocks = extract_summary_from_report(content)
 
-    max_card_content = 28000
-    if len(content) > max_card_content:
-        content = content[:max_card_content] + "\n\n...[内容已截断，完整内容见文件]"
+    if not title:
+        filename = os.path.basename(file_path)
+        title = filename.replace('.md', '')
+
+    if not alerts_text:
+        alerts_text = "暂无重要提醒"
+
+    # 构造金股推荐文本
+    gold_lines = []
+    for i, stock in enumerate(gold_stocks[:10], 1):
+        line = f"**{i}. {stock['name']}（{stock['code']}）**"
+        if stock['level']:
+            line += f" —— {stock['level']}"
+        if stock['reason']:
+            reason = stock['reason']
+            if len(reason) > 120:
+                reason = reason[:120] + "..."
+            line += f"\n   推荐理由：{reason}"
+        gold_lines.append(line)
+    gold_text = '\n'.join(gold_lines) if gold_lines else "暂无金股推荐"
 
     payload = {
         "msg_type": "interactive",
@@ -307,7 +402,17 @@ def send_text_card_via_webhook(file_path):
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": content
+                        "content": f"**🔔 重要提醒**\n\n{alerts_text}"
+                    }
+                },
+                {
+                    "tag": "hr"
+                },
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**⭐ 金股推荐**\n\n{gold_text}"
                     }
                 },
                 {
@@ -318,7 +423,7 @@ def send_text_card_via_webhook(file_path):
                     "elements": [
                         {
                             "tag": "plain_text",
-                            "content": f"完整报告文件已通过应用机器人单独发送"
+                            "content": "完整报告见附件文件"
                         }
                     ]
                 }
@@ -328,14 +433,14 @@ def send_text_card_via_webhook(file_path):
 
     webhook = get_webhook()
     if not webhook:
-        print("[WARN] 未配置Webhook，跳过文本预览")
+        print("[WARN] 未配置Webhook，跳过摘要推送")
         return False
 
     try:
         resp = requests.post(webhook, json=payload, timeout=30)
         result = resp.json()
         if result.get("code") == 0:
-            print(f"[OK] Webhook文本预览发送成功")
+            print(f"[OK] Webhook摘要推送成功（重要提醒+{len(gold_stocks)}只金股）")
             return True
         else:
             print(f"[WARN] Webhook发送失败: {result}")
@@ -346,19 +451,118 @@ def send_text_card_via_webhook(file_path):
 
 
 # ---------------------------------------------------------------------------
+# 钱三强选股结果MD文件生成
+# ---------------------------------------------------------------------------
+
+def generate_qsq_md_report(qsq_json_path, report_date_str):
+    """从 qian_sanqiang_results.json 生成可读的MD文件
+
+    Args:
+        qsq_json_path: qian_sanqiang_results.json 文件路径
+        report_date_str: 报告日期字符串，如 "2026-06-24"
+
+    Returns:
+        str: 生成的MD文件路径，失败返回 None
+    """
+    if not os.path.exists(qsq_json_path):
+        print(f"[WARN] 钱三强选股结果文件不存在: {qsq_json_path}")
+        return None
+
+    try:
+        with open(qsq_json_path, 'r', encoding='utf-8') as f:
+            qsq = json.load(f)
+    except Exception as e:
+        print(f"[ERROR] 读取选股结果失败: {e}")
+        return None
+
+    trade_date = qsq.get('trade_date', report_date_str)
+    summary = qsq.get('summary', {})
+    selected = qsq.get('selected_stocks', [])
+    two_of_three = qsq.get('two_of_three_stocks', [])
+
+    lines = []
+    lines.append(f"# 钱三强选股结果（{report_date_str}）")
+    lines.append("")
+    lines.append(f"> 交易日: {trade_date} | 资金流向日期: {qsq.get('moneyflow_date', '数据暂缺')}")
+    lines.append(f"> 参与计算股票: {summary.get('total_stocks', '数据暂缺')} 只")
+    lines.append("")
+    lines.append("## 选股统计")
+    lines.append("")
+    lines.append(f"| 条件 | 通过数量 |")
+    lines.append(f"|------|---------|")
+    lines.append(f"| 第一强(多条件创新高) | {summary.get('pass_di_yi_qiang', '数据暂缺')} 只 |")
+    lines.append(f"| 第二强(智能换手率) | {summary.get('pass_di_er_qiang', '数据暂缺')} 只 |")
+    lines.append(f"| 第三强(资金共振) | {summary.get('pass_di_san_qiang', '数据暂缺')} 只 |")
+    lines.append(f"| **三强合一(最终选股)** | **{summary.get('pass_all_three', '数据暂缺')} 只** |")
+    lines.append("")
+
+    # 三强合一选股
+    if selected:
+        lines.append("## 三强合一选股结果")
+        lines.append("")
+        lines.append("| 序号 | 代码 | 名称 | 行业 | 收盘价 | 涨幅 | 换手率 | 机构资金(万) | 游资资金(万) | EMA55角度 |")
+        lines.append("|------|------|------|------|--------|------|--------|-------------|-------------|-----------|")
+        for i, s in enumerate(selected, 1):
+            lines.append(
+                f"| {i} | {s.get('ts_code','')} | {s.get('name','')} | {s.get('industry','')} | "
+                f"{s.get('close','')} | {s.get('pct_chg','')}% | {s.get('turnover_rate','')}% | "
+                f"{s.get('jigou_zijin','')} | {s.get('youzi_zijin','')} | {s.get('ema55_angle','')}° |"
+            )
+        lines.append("")
+
+    # 满足两强的股票
+    if two_of_three:
+        lines.append("## 满足两强条件股票（前30只）")
+        lines.append("")
+        lines.append("| 序号 | 代码 | 名称 | 行业 | 收盘价 | 涨幅 | 换手率 | 机构资金(万) | 游资资金(万) | 通过条件 |")
+        lines.append("|------|------|------|------|--------|------|--------|-------------|-------------|---------|")
+        for i, s in enumerate(two_of_three[:30], 1):
+            conds = []
+            if s.get('di_yi_qiang'): conds.append("第一强")
+            if s.get('di_er_qiang'): conds.append("第二强")
+            if s.get('di_san_qiang'): conds.append("第三强")
+            cond_str = "+".join(conds)
+            lines.append(
+                f"| {i} | {s.get('ts_code','')} | {s.get('name','')} | {s.get('industry','')} | "
+                f"{s.get('close','')} | {s.get('pct_chg','')}% | {s.get('turnover_rate','')}% | "
+                f"{s.get('jigou_zijin','')} | {s.get('youzi_zijin','')} | {cond_str} |"
+            )
+        lines.append("")
+
+    lines.append("---")
+    lines.append("*本文件由钱三强选股公式自动生成，数据来源: Tushare API*")
+    lines.append(f"*生成时间: {report_date_str}*")
+
+    md_content = '\n'.join(lines)
+
+    # 保存到reports目录
+    reports_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reports")
+    if not os.path.exists(reports_dir):
+        reports_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+    os.makedirs(reports_dir, exist_ok=True)
+
+    md_path = os.path.join(reports_dir, f"{report_date_str}_钱三强选股.md")
+    with open(md_path, 'w', encoding='utf-8') as f:
+        f.write(md_content)
+
+    print(f"[OK] 钱三强选股MD文件已生成: {md_path}")
+    return md_path
+
+
+# ---------------------------------------------------------------------------
 # 主推送函数
 # ---------------------------------------------------------------------------
 
 def push_to_feishu(file_path):
     """推送报告到飞书
-    
+
     流程：
-    1. 通过 Open API 上传文件并发送文件消息（主要）
-    2. 通过 Webhook 发送文本内容卡片（预览）
-    
+    1. 通过 Open API 上传并发送文件（报告MD + 钱三强选股MD）
+    2. 通过 Webhook 发送重要提醒+金股摘要（不发送全文）
+
     Args:
         file_path: 报告文件路径
-        
+
     Returns:
         bool: 文件发送是否成功
     """
@@ -371,19 +575,41 @@ def push_to_feishu(file_path):
     print(f"  飞书推送: {filename}")
     print(f"{'='*60}")
 
+    # --- 准备钱三强选股MD文件 ---
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(script_dir, "data")
+    qsq_json_path = os.path.join(data_dir, "qian_sanqiang_results.json")
+
+    # 从报告文件名提取日期 (如 2026-06-24_晚报.md -> 2026-06-24)
+    base_name = os.path.basename(file_path)
+    date_str = base_name.split('_')[0] if '_' in base_name else ""
+
+    qsq_md_path = generate_qsq_md_report(qsq_json_path, date_str)
+
     # --- 步骤1: 通过 Open API 发送文件 ---
     print("\n[步骤1] 通过Open API发送文件...")
     token = get_tenant_access_token()
     file_sent = False
+    qsq_sent = False
 
     if token:
         print(f"[OK] 获取 tenant_access_token 成功")
         chat_id = find_target_chat(token)
 
         if chat_id:
+            # 发送主报告文件
             file_key = upload_file(token, file_path)
             if file_key:
                 file_sent = send_file_message(token, chat_id, file_key)
+
+            # 发送钱三强选股结果文件
+            if qsq_md_path and os.path.exists(qsq_md_path):
+                print(f"\n  [1.1] 发送钱三强选股结果文件...")
+                qsq_file_key = upload_file(token, qsq_md_path)
+                if qsq_file_key:
+                    qsq_sent = send_file_message(token, chat_id, qsq_file_key)
+            else:
+                print(f"  [SKIP] 钱三强选股结果文件不存在，跳过")
     else:
         print("[WARN] 无法获取 tenant_access_token，跳过文件发送")
         print("       可能原因：")
@@ -391,18 +617,20 @@ def push_to_feishu(file_path):
         print("       2. 网络连接问题")
         print("       3. 应用未发布或未启用机器人能力")
 
-    # --- 步骤2: 通过 Webhook 发送文本预览 ---
-    print(f"\n[步骤2] 通过Webhook发送文本预览...")
-    webhook_sent = send_text_card_via_webhook(file_path)
+    # --- 步骤2: 通过 Webhook 发送重要提醒+金股摘要 ---
+    print(f"\n[步骤2] 通过Webhook发送重要提醒+金股摘要...")
+    webhook_sent = send_summary_via_webhook(file_path)
 
     # --- 汇总 ---
     print(f"\n{'='*60}")
-    if file_sent:
-        print(f"  ✅ 文件发送成功 + Webhook{'成功' if webhook_sent else '跳过'}")
+    if file_sent and qsq_sent:
+        print(f"  ✅ 报告+选股文件发送成功 + 摘要推送{'成功' if webhook_sent else '跳过'}")
+    elif file_sent:
+        print(f"  ✅ 报告文件发送成功(选股文件{'成功' if qsq_sent else '失败'}) + 摘要推送{'成功' if webhook_sent else '跳过'}")
     elif webhook_sent:
-        print(f"  ⚠️ 文件发送失败，但Webhook文本预览已发送")
+        print(f"  ⚠️ 文件发送失败，但摘要推送已发送")
     else:
-        print(f"  ❌ 文件和Webhook均发送失败")
+        print(f"  ❌ 文件和摘要推送均发送失败")
     print(f"{'='*60}")
 
     return file_sent or webhook_sent
