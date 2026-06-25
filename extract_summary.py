@@ -1284,6 +1284,109 @@ def extract_chapter_vip(data):
 
 
 # ---------------------------------------------------------------------------
+# 周报摘要提取（v2.0）
+# ---------------------------------------------------------------------------
+
+def extract_weekly_summary(data):
+    """从周报数据中提取周报摘要
+
+    v2.0: 周报模式专用，聚合本周每日报告、电报归档、最新选股结果。
+
+    Args:
+        data: raw_data_weekly.json 的数据
+
+    Returns:
+        dict: 周报摘要
+    """
+    import datetime as _dt
+    summary_time = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    summary = {
+        "meta": {
+            "source_file": "raw_data_weekly.json",
+            "mode": "weekly",
+            "fetch_time": data.get("fetch_time", ""),
+            "week_start": data.get("week_start", ""),
+            "week_end": data.get("week_end", ""),
+            "summary_time": summary_time,
+        },
+    }
+
+    # 1. 本周每日报告汇总
+    daily_reports = data.get("daily_reports", {})
+    report_summary = []
+    total_reports = 0
+    for date_str, reports in sorted(daily_reports.items()):
+        for report_type, info in reports.items():
+            report_summary.append({
+                "date": date_str,
+                "type": report_type,
+                "content_length": info.get("content_length", 0),
+                "preview": info.get("preview", "")[:200],
+            })
+            total_reports += 1
+
+    summary["weekly_reports"] = {
+        "total_reports": total_reports,
+        "reports": report_summary,
+        "note": f"本周共{total_reports}篇报告，包含每日晨报/午报/晚报的前500字预览",
+    }
+    print(f"  [周报] 本周报告: {total_reports} 篇")
+
+    # 2. 本周电报归档汇总
+    telegraph_archive = data.get("telegraph_archive", {})
+    telegraph_summary = []
+    total_telegraph = 0
+    total_red = 0
+    from collections import Counter
+    weekly_hot_stocks = Counter()
+
+    for date_str, info in sorted(telegraph_archive.items()):
+        count = info.get("total_count", 0)
+        red = info.get("red_count", 0)
+        telegraph_summary.append({
+            "date": date_str,
+            "total": count,
+            "red": red,
+        })
+        total_telegraph += count
+        total_red += red
+        for stock in info.get("hot_stocks", []):
+            weekly_hot_stocks[stock["name"]] += stock.get("mentions", 1)
+
+    summary["weekly_telegraph"] = {
+        "total_count": total_telegraph,
+        "total_red": total_red,
+        "daily_breakdown": telegraph_summary,
+        "weekly_hot_stocks": [
+            {"name": s, "mentions": c}
+            for s, c in weekly_hot_stocks.most_common(30)
+        ],
+        "note": f"本周共归档{total_telegraph}条电报，其中{total_red}条红色重要电报",
+    }
+    print(f"  [周报] 本周电报: {total_telegraph} 条, 红色: {total_red} 条")
+
+    # 3. 最新数据摘要（周五收盘数据）
+    latest_summary = data.get("latest_summary", {})
+    summary["latest_daily_summary"] = latest_summary
+    print(f"  [周报] 最新摘要交易日: {latest_summary.get('meta', {}).get('trade_date', 'N/A')}")
+
+    # 4. 最新钱三强选股结果
+    latest_qsq = data.get("latest_qsq", {})
+    summary["latest_qsq"] = latest_qsq
+    print(f"  [周报] 钱三强选股: {latest_qsq.get('selected_stocks_count', 0)} 只三强合一股票")
+
+    # 5. 周报分析指引
+    summary["weekly_analysis_guide"] = {
+        "structure": "周报应包含: 本周市场回顾/主线叙事演变/板块轮动/钱三强选股表现/下周策略展望",
+        "data_reference": "weekly_reports(每日报告预览) + weekly_telegraph(电报热点) + latest_daily_summary(最新收盘数据) + latest_qsq(选股结果)",
+        "note": "周报不限于单日视角，应从周维度分析主线叙事的演变和板块轮动趋势",
+    }
+
+    return summary
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 
@@ -1328,56 +1431,63 @@ def main():
     # 加载数据
     data = load_raw_data(input_file)
 
-    # 提取各章摘要
-    print("\n[INFO] 开始提取摘要数据...")
-    summary = {}
+    # v2.0: 检查是否为周报模式
+    is_weekly = data.get("mode") == "weekly"
 
-    # 元信息
-    summary["meta"] = {
-        "source_file": os.path.basename(input_file),
-        "mode": data.get("mode", "数据暂缺"),
-        "fetch_time": data.get("fetch_time", "数据暂缺"),
-        "trade_date": data.get("trade_date", "数据暂缺"),
-        "summary_time": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
+    if is_weekly:
+        print("\n[INFO] 检测到周报模式，生成周报摘要...")
+        summary = extract_weekly_summary(data)
+    else:
+        # 提取各章摘要
+        print("\n[INFO] 开始提取摘要数据...")
+        summary = {}
 
-    # 第零章: 财联社信源扫描（核心信源，推理链起点）
-    print("  [0/5] 提取第零章: 财联社信源扫描...")
-    summary.update(extract_chapter0_cls(data))
+        # 元信息
+        summary["meta"] = {
+            "source_file": os.path.basename(input_file),
+            "mode": data.get("mode", "数据暂缺"),
+            "fetch_time": data.get("fetch_time", "数据暂缺"),
+            "trade_date": data.get("trade_date", "数据暂缺"),
+            "summary_time": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
-    # 第一章: 大盘概览
-    print("  [1/5] 提取第一章: 大盘概览...")
-    summary.update(extract_chapter1(data))
+        # 第零章: 财联社信源扫描（核心信源，推理链起点）
+        print("  [0/5] 提取第零章: 财联社信源扫描...")
+        summary.update(extract_chapter0_cls(data))
 
-    # 第二章: 龙虎榜与资金动向
-    print("  [2/5] 提取第二章: 龙虎榜与资金动向...")
-    summary.update(extract_chapter2(data))
+        # 第一章: 大盘概览
+        print("  [1/5] 提取第一章: 大盘概览...")
+        summary.update(extract_chapter1(data))
 
-    # 第三章: 资金流向分析
-    print("  [3/5] 提取第三章: 资金流向分析...")
-    summary.update(extract_chapter3(data))
+        # 第二章: 龙虎榜与资金动向
+        print("  [2/5] 提取第二章: 龙虎榜与资金动向...")
+        summary.update(extract_chapter2(data))
 
-    # 第四章: 涨跌停与市场情绪
-    print("  [4/5] 提取第四章: 涨跌停与市场情绪...")
-    summary.update(extract_chapter4(data))
+        # 第三章: 资金流向分析
+        print("  [3/5] 提取第三章: 资金流向分析...")
+        summary.update(extract_chapter3(data))
 
-    # 第六章: 数据质量报告
-    print("  [5/5] 提取第六章: 数据质量报告...")
-    summary.update(extract_chapter6(data))
+        # 第四章: 涨跌停与市场情绪
+        print("  [4/5] 提取第四章: 涨跌停与市场情绪...")
+        summary.update(extract_chapter4(data))
 
-    # 钱三强选股结果（共振分析）
-    print("  [5.5/7] 提取钱三强选股结果...")
-    summary.update(extract_chapter_qsq(data))
+        # 第六章: 数据质量报告
+        print("  [5/5] 提取第六章: 数据质量报告...")
+        summary.update(extract_chapter6(data))
 
-    # VIP信息表（v2.0: 从fetch_data.py的VIP提取结果中读取）
-    print("  [5.6/7] 提取VIP信息表...")
-    summary.update(extract_chapter_vip(data))
+        # 钱三强选股结果（共振分析）
+        print("  [5.5/7] 提取钱三强选股结果...")
+        summary.update(extract_chapter_qsq(data))
 
-    # 第五章说明: 直接引用前面各章数据
-    summary["chapter5"] = {
-        "note": "第五章（次日策略预判与金股）引用 chapter3 资金流向 + chapter_qsq 钱三强选股共振分析 + chapter_vip VIP信息表",
-        "data_reference": "chapter3.moneyflow_aggregate + chapter_qsq.selected_stocks + chapter_qsq.two_of_three_stocks + chapter_vip.vip_stocks",
-    }
+        # VIP信息表（v2.0: 从fetch_data.py的VIP提取结果中读取）
+        print("  [5.6/7] 提取VIP信息表...")
+        summary.update(extract_chapter_vip(data))
+
+        # 第五章说明: 直接引用前面各章数据
+        summary["chapter5"] = {
+            "note": "第五章（次日策略预判与金股）引用 chapter3 资金流向 + chapter_qsq 钱三强选股共振分析 + chapter_vip VIP信息表",
+            "data_reference": "chapter3.moneyflow_aggregate + chapter_qsq.selected_stocks + chapter_qsq.two_of_three_stocks + chapter_vip.vip_stocks",
+        }
 
     # 确定输出文件
     if args.output:

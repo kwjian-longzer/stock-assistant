@@ -52,11 +52,12 @@ stock-assistant/
          → CLS API故障时：运行 python -c "from fetch_data import cls_api_diagnostic; cls_api_diagnostic()" 诊断
          → 参照 docs/CLS_API_STRATEGY.md 第八章 Agent自修复指南 修复
 
-步骤1:   python fetch_data.py [morning|noon|evening]
+步骤1:   python fetch_data.py [morning|noon|evening|weekly]
          → 生成 data/raw_data_YYYYMMDD_mode.json + data/raw_data_latest.json
          → 包含财联社电报（API）+ 财联社页面（读取cls_pages.json）
          → 自动运行钱三强选股，生成 data/qian_sanqiang_results.json
          → v2.0: 电报采集后自动归档到 data/cls_telegraph_archive/YYYY-MM-DD.json（增量去重）
+         → v2.0: weekly模式不采集实时数据，读取本周报告+电报归档+数据摘要，生成raw_data_weekly.json
 
 步骤2:   python extract_summary.py
          → 读取 raw_data_latest.json + qian_sanqiang_results.json

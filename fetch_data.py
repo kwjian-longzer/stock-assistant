@@ -1685,15 +1685,169 @@ def run_data_quality_check(data, data_quality):
 # ---------------------------------------------------------------------------
 
 
+def fetch_weekly_data():
+    """v2.0: 周报数据采集
+
+    不调用实时API（周末市场休市），而是读取本周已存入仓库的数据:
+    - 历史报告 (reports/ 目录下本周的MD文件)
+    - 电报归档 (data/cls_telegraph_archive/ 本周的JSON文件)
+    - 数据摘要 (data/data_summary.json 最新版本)
+    - 钱三强选股结果 (data/qian_sanqiang_results.json)
+
+    输出: data/raw_data_weekly.json
+    """
+    print("=== 周报数据采集 [weekly] ===")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(script_dir, "data")
+    reports_dir = os.path.join(script_dir, "reports")
+    archive_dir = os.path.join(data_dir, "cls_telegraph_archive")
+
+    today = datetime.datetime.now()
+    # 计算本周一到今天的日期范围
+    week_start = today - datetime.timedelta(days=today.weekday())  # 周一
+    week_dates = [(week_start + datetime.timedelta(days=i)).strftime('%Y-%m-%d')
+                  for i in range(7)]
+
+    print(f"本周日期范围: {week_dates[0]} ~ {week_dates[-1]}")
+
+    weekly_data = {
+        "mode": "weekly",
+        "fetch_time": today.strftime('%Y-%m-%d %H:%M:%S'),
+        "week_start": week_dates[0],
+        "week_end": week_dates[-1],
+        "daily_reports": {},
+        "telegraph_archive": {},
+        "latest_summary": {},
+        "latest_qsq": {},
+    }
+
+    # 1. 读取本周每日报告
+    print("\n[1/4] 读取本周每日报告...")
+    for date_str in week_dates:
+        # 查找该日期的所有报告文件
+        for report_type in ["晨报", "午报", "晚报"]:
+            report_path = os.path.join(reports_dir, f"{date_str}_{report_type}.md")
+            if os.path.exists(report_path):
+                try:
+                    with open(report_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    if date_str not in weekly_data["daily_reports"]:
+                        weekly_data["daily_reports"][date_str] = {}
+                    weekly_data["daily_reports"][date_str][report_type] = {
+                        "content_length": len(content),
+                        "preview": content[:500],  # 前500字预览
+                        "path": report_path,
+                    }
+                    print(f"  找到: {date_str}_{report_type}.md ({len(content)} 字符)")
+                except Exception as e:
+                    print(f"  [WARN] 读取报告失败 {report_path}: {e}")
+
+    report_count = sum(len(v) for v in weekly_data["daily_reports"].values())
+    print(f"  本周报告总数: {report_count} 篇")
+
+    # 2. 读取本周电报归档
+    print("\n[2/4] 读取本周电报归档...")
+    total_telegraph = 0
+    for date_str in week_dates:
+        archive_path = os.path.join(archive_dir, f"{date_str}.json")
+        if os.path.exists(archive_path):
+            try:
+                with open(archive_path, 'r', encoding='utf-8') as f:
+                    archive = json.load(f)
+                items = archive.get('items', [])
+                # 统计红色电报
+                red_count = sum(1 for it in items if it.get('is_red'))
+                # 提取热门股票
+                from collections import Counter
+                all_stocks = []
+                for it in items:
+                    stocks = it.get('stocks', [])
+                    if isinstance(stocks, list):
+                        all_stocks.extend(stocks)
+                hot_stocks = Counter(all_stocks).most_common(20)
+
+                weekly_data["telegraph_archive"][date_str] = {
+                    "total_count": len(items),
+                    "red_count": red_count,
+                    "hot_stocks": [{"name": s, "mentions": c} for s, c in hot_stocks],
+                    "earliest": items[0].get('time', 0) if items else 0,
+                    "latest": items[-1].get('time', 0) if items else 0,
+                }
+                total_telegraph += len(items)
+                print(f"  {date_str}: {len(items)} 条电报, {red_count} 条红色")
+            except Exception as e:
+                print(f"  [WARN] 读取归档失败 {archive_path}: {e}")
+
+    print(f"  本周电报总数: {total_telegraph} 条")
+
+    # 3. 读取最新数据摘要
+    print("\n[3/4] 读取最新数据摘要...")
+    summary_path = os.path.join(data_dir, "data_summary.json")
+    if os.path.exists(summary_path):
+        try:
+            with open(summary_path, 'r', encoding='utf-8') as f:
+                summary = json.load(f)
+            # 只保留关键章节，不保留全部（避免数据过大）
+            weekly_data["latest_summary"] = {
+                "meta": summary.get("meta", {}),
+                "chapter1_index": summary.get("chapter1", {}).get("index_summary", []),
+                "chapter0_cls_telegraph_archive": summary.get("chapter0_cls", {}).get("cls_telegraph", {}).get("archive", {}),
+            }
+            print(f"  最新摘要交易日: {summary.get('meta', {}).get('trade_date', 'N/A')}")
+        except Exception as e:
+            print(f"  [WARN] 读取摘要失败: {e}")
+
+    # 4. 读取最新钱三强选股结果
+    print("\n[4/4] 读取最新钱三强选股结果...")
+    qsq_path = os.path.join(data_dir, "qian_sanqiang_results.json")
+    if os.path.exists(qsq_path):
+        try:
+            with open(qsq_path, 'r', encoding='utf-8') as f:
+                qsq = json.load(f)
+            weekly_data["latest_qsq"] = {
+                "trade_date": qsq.get("trade_date", ""),
+                "summary": qsq.get("summary", {}),
+                "selected_stocks_count": len(qsq.get("selected_stocks", [])),
+                "selected_stocks_preview": qsq.get("selected_stocks", [])[:10],
+            }
+            print(f"  钱三强选股日期: {qsq.get('trade_date', 'N/A')}")
+            print(f"  三强合一股票: {len(qsq.get('selected_stocks', []))} 只")
+        except Exception as e:
+            print(f"  [WARN] 读取钱三强结果失败: {e}")
+
+    # 保存
+    os.makedirs(data_dir, exist_ok=True)
+    output_path = os.path.join(data_dir, "raw_data_weekly.json")
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(weekly_data, f, ensure_ascii=False, indent=2)
+
+    # 同时保存为latest
+    latest_path = os.path.join(data_dir, "raw_data_latest.json")
+    with open(latest_path, 'w', encoding='utf-8') as f:
+        json.dump(weekly_data, f, ensure_ascii=False, indent=2)
+
+    print(f"\n周报数据已保存: {output_path}")
+    print(f"数据大小: {len(json.dumps(weekly_data, ensure_ascii=False))} 字符")
+
+    return output_path
+
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python fetch_data.py [morning|noon|evening|weekend]")
+        print("Usage: python fetch_data.py [morning|noon|evening|weekend|weekly]")
         sys.exit(1)
 
     mode = sys.argv[1]
-    if mode not in ("morning", "noon", "evening", "weekend"):
-        print(f"无效模式: {mode}，请使用 morning/noon/evening/weekend")
+    if mode not in ("morning", "noon", "evening", "weekend", "weekly"):
+        print(f"无效模式: {mode}，请使用 morning/noon/evening/weekend/weekly")
         sys.exit(1)
+
+    # v2.0: 周报模式 - 不采集实时数据，读取本周归档+报告
+    if mode == "weekly":
+        weekly_file = fetch_weekly_data()
+        print(f"\n=== 周报数据采集完成 ===")
+        print(f"输出文件: {weekly_file}")
+        return weekly_file
 
     today = datetime.datetime.now()
     today_str = today.strftime('%Y%m%d')
