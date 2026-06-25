@@ -1,10 +1,4 @@
 {
-  "summary": {
-    "total": 12,
-    "win_rate": 0.583,
-    "avg_return": 4.32,
-    "avg_max_draw": -3.86
-  },
   "stocks": [
     {
       "name": "万丰奥威",
@@ -40,7 +34,15 @@
       "ret_5d": 6.31,
       "max_gain": 12.88,
       "max_draw": -3.42,
-      "reason": "先进封装+AI算力链+龙虎榜机构+41亿"
+      "reason": "先进封装+AI算力链+龙虎榜机构+41亿",
+      "recommendations": [
+        {
+          "date": "2026-06-25",
+          "type": "evening",
+          "reason": "半导体封测龙头，全球第三大封测企业 + VIP研报\"半导体设备趋势性繁荣\"+美光炸裂财报催化存储需求（L2信号）",
+          "score": 93
+        }
+      ]
     },
     {
       "name": "聚辰股份",
@@ -52,7 +54,15 @@
       "ret_5d": 19.74,
       "max_gain": 31.2,
       "max_draw": -5.18,
-      "reason": "存储芯片+科创板20cm+机构净买17亿"
+      "reason": "存储芯片+科创板20cm+机构净买17亿",
+      "recommendations": [
+        {
+          "date": "2026-06-25",
+          "type": "evening",
+          "reason": "半导体/存储芯片EEPROM+SPD，DDR5内存条标配 + VIP研报\"美光炸裂财报点燃存储芯片行情\"+\"存储芯片景气\"（L2信号）",
+          "score": 93
+        }
+      ]
     },
     {
       "name": "德明利",
@@ -149,6 +159,151 @@
       "max_gain": 16.78,
       "max_draw": -3.55,
       "reason": "半导体设备+晶圆厂扩产+机构调研"
+    },
+    {
+      "name": "华灿光电",
+      "code": "300323",
+      "first_recommended": "2026-06-25",
+      "recommendations": [
+        {
+          "date": "2026-06-25",
+          "type": "evening",
+          "reason": "半导体/LED芯片，切入Mini LED和Micro LED + VIP研报\"半导体设备趋势性繁荣\"+深度头条\"半导体估值扩张\"（L2信号）",
+          "score": 82
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": 18.32,
+        "current_price": 18.32,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": 0.0,
+        "max_drawdown": 0.0
+      }
+    },
+    {
+      "name": "光韵达",
+      "code": "300227",
+      "first_recommended": "2026-06-25",
+      "recommendations": [
+        {
+          "date": "2026-06-25",
+          "type": "evening",
+          "reason": "专用机械/精密激光加工，切入PCB/FPC/3D打印 + VIP研报\"AI PCB全产业链高景气\"（L2信号）",
+          "score": 82
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": 13.55,
+        "current_price": 13.55,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": 0.0,
+        "max_drawdown": 0.0
+      }
+    },
+    {
+      "name": "TCL科技",
+      "code": "000100",
+      "first_recommended": "2026-06-25",
+      "recommendations": [
+        {
+          "date": "2026-06-25",
+          "type": "evening",
+          "reason": "元器件/面板龙头，半导体显示+新能源光伏双主业 + VIP研报\"AI投资热潮向上游扩散\"（L2信号）",
+          "score": 88
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": 5.34,
+        "current_price": 5.34,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": 0.0,
+        "max_drawdown": 0.0
+      }
+    },
+    {
+      "name": "锐科激光",
+      "code": "300747",
+      "first_recommended": "2026-06-25",
+      "recommendations": [
+        {
+          "date": "2026-06-25",
+          "type": "evening",
+          "reason": "专用机械/光纤激光器龙头，切入半导体加工和新能源焊接 + VIP研报\"AI基础建设提速+行业更新改造需求共振\"（L2信号）",
+          "score": 77
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": 59.18,
+        "current_price": 59.18,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": 0.0,
+        "max_drawdown": 0.0
+      }
+    },
+    {
+      "name": "光智科技",
+      "code": "300489",
+      "first_recommended": "2026-06-25",
+      "recommendations": [
+        {
+          "date": "2026-06-25",
+          "type": "evening",
+          "reason": "专用机械/红外光学+半导体材料，切入探测器芯片 + 深度头条\"企业级AI Agent深水区\"催化科技硬件需求（L2信号）",
+          "score": 77
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": 288.29,
+        "current_price": 288.29,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": 0.0,
+        "max_drawdown": 0.0
+      }
+    },
+    {
+      "name": "长江证券",
+      "code": "000783",
+      "first_recommended": "2026-06-25",
+      "recommendations": [
+        {
+          "date": "2026-06-25",
+          "type": "evening",
+          "reason": "证券/券商，深度参与科创板投资，\"站在科创里\"逻辑 + 深度头条\"券商股大涨逻辑变了？华安、长江站在科创里\"（L2信号）",
+          "score": 62
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": 10.15,
+        "current_price": 10.15,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": 0.0,
+        "max_drawdown": 0.0
+      }
     }
-  ]
+  ],
+  "last_updated": "2026-06-25"
 }

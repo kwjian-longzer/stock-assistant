@@ -1,42 +1,14 @@
 {
+  "generated_at": "2026-06-25 19:54:54",
   "latest_date": "2026-06-25",
   "latest_type": "evening",
-  "updated_at": "2026-06-25 20:00:00",
-  "archives": [
-    {
-      "date": "2026-06-25",
-      "type": "morning",
-      "title": "多维市场研报（晨报）"
-    },
-    {
-      "date": "2026-06-25",
-      "type": "noon",
-      "title": "多维市场研报（午报）"
-    },
+  "reports": [
     {
       "date": "2026-06-25",
       "type": "evening",
-      "title": "多维市场研报（晚报）"
-    },
-    {
-      "date": "2026-06-24",
-      "type": "evening",
-      "title": "多维市场研报（晚报）"
-    },
-    {
-      "date": "2026-06-23",
-      "type": "evening",
-      "title": "多维市场研报（晚报）"
-    },
-    {
-      "date": "2026-06-22",
-      "type": "saturday",
-      "title": "周六复盘"
-    },
-    {
-      "date": "2026-06-21",
-      "type": "sunday",
-      "title": "周日展望"
+      "title": "多维市场研报（晚报）",
+      "score": 90,
+      "summary": "今日财联社电报覆盖时段为11:20至15:53，新增20条（当日累计40条）。本日电报无红色重要信号，但晚间时段释放多条值得关注的宏观信号："
     }
   ]
 }
