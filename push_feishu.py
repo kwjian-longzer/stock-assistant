@@ -629,6 +629,14 @@ def git_commit_and_push(report_path):
     if os.path.exists(qsq_json_path):
         files_to_add.append(qsq_json_path)
 
+    # 5. v2.0: 电报归档目录（增量归档，跨任务共享）
+    archive_dir = os.path.join(script_dir, "data", "cls_telegraph_archive")
+    if os.path.isdir(archive_dir):
+        # 添加目录下所有 .json 文件
+        for fname in os.listdir(archive_dir):
+            if fname.endswith('.json'):
+                files_to_add.append(os.path.join(archive_dir, fname))
+
     if not files_to_add:
         print("  [SKIP] 没有需要提交的文件")
         return False

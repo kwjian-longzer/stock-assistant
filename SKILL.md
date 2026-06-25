@@ -30,7 +30,9 @@ stock-assistant/
 │   ├── raw_data_*.json   # 原始采集数据（24万行+，AI不应直接读取，gitignore排除）
 │   ├── raw_data_latest.json  # 最新原始数据软链接（gitignore排除）
 │   ├── qian_sanqiang_results.json  # 钱三强选股结果（三强合一+共振分析）✅纳入git
-│   └── data_summary.json # 数据摘要（AI写报告的唯一数据来源）✅纳入git
+│   ├── data_summary.json # 数据摘要（AI写报告的唯一数据来源）✅纳入git
+│   └── cls_telegraph_archive/  # v2.0: 电报增量归档 ✅纳入git（跨任务共享）
+│       └── YYYY-MM-DD.json    # 当日电报全量（去重合并）
 └── reports/              # 报告输出目录（v2.0: ✅纳入git，自动commit+push）
     └── YYYY-MM-DD_晨报/午报/晚报.md
 ```
@@ -54,6 +56,7 @@ stock-assistant/
          → 生成 data/raw_data_YYYYMMDD_mode.json + data/raw_data_latest.json
          → 包含财联社电报（API）+ 财联社页面（读取cls_pages.json）
          → 自动运行钱三强选股，生成 data/qian_sanqiang_results.json
+         → v2.0: 电报采集后自动归档到 data/cls_telegraph_archive/YYYY-MM-DD.json（增量去重）
 
 步骤2:   python extract_summary.py
          → 读取 raw_data_latest.json + qian_sanqiang_results.json

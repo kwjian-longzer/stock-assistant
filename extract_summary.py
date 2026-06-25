@@ -28,6 +28,81 @@ from collections import defaultdict, Counter
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPT_DIR, "data")
+ARCHIVE_DIR = os.path.join(DATA_DIR, "cls_telegraph_archive")
+
+
+def _read_telegraph_archive():
+    """读取今日电报归档的统计信息
+
+    v2.0: 从 data/cls_telegraph_archive/YYYY-MM-DD.json 读取归档信息，
+    供摘要生成时提供全天电报覆盖的时间范围标注。
+
+    Returns:
+        dict: 归档统计信息，读取失败返回空 dict
+    """
+    import datetime as _dt
+    today_str = _dt.datetime.now().strftime('%Y-%m-%d')
+    archive_path = os.path.join(ARCHIVE_DIR, f"{today_str}.json")
+
+    if not os.path.exists(archive_path):
+        return {}
+
+    try:
+        with open(archive_path, 'r', encoding='utf-8') as f:
+            archive_data = json.load(f)
+        return {
+            'archive_date': archive_data.get('date', today_str),
+            'archive_total': archive_data.get('total_count', 0),
+            'archive_earliest': _ts_to_str(_min_ts(archive_data.get('items', []))),
+            'archive_latest': _ts_to_str(_max_ts(archive_data.get('items', []))),
+            'last_updated': archive_data.get('last_updated', ''),
+        }
+    except Exception:
+        return {}
+
+
+def _get_archive_items():
+    """读取今日电报归档的完整电报列表
+
+    Returns:
+        list: 归档中的电报列表，读取失败返回空列表
+    """
+    import datetime as _dt
+    today_str = _dt.datetime.now().strftime('%Y-%m-%d')
+    archive_path = os.path.join(ARCHIVE_DIR, f"{today_str}.json")
+
+    if not os.path.exists(archive_path):
+        return []
+
+    try:
+        with open(archive_path, 'r', encoding='utf-8') as f:
+            archive_data = json.load(f)
+        return archive_data.get('items', [])
+    except Exception:
+        return []
+
+
+def _ts_to_str(ts):
+    """时间戳转字符串"""
+    if not ts:
+        return "N/A"
+    try:
+        import datetime as _dt
+        return _dt.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return str(ts)
+
+
+def _min_ts(items):
+    """从电报列表中获取最早时间戳"""
+    times = [it.get('time', 0) for it in items if it.get('time', 0)]
+    return min(times) if times else 0
+
+
+def _max_ts(items):
+    """从电报列表中获取最晚时间戳"""
+    times = [it.get('time', 0) for it in items if it.get('time', 0)]
+    return max(times) if times else 0
 
 
 def parse_sina_raw(raw_text):
@@ -203,16 +278,37 @@ def extract_chapter0_cls(data):
         stock_counter = Counter(all_stocks)
         hot_stocks = [{"name": s, "mentions": c} for s, c in stock_counter.most_common(20) if s]
 
+        # v2.0: 读取电报归档，获取全天覆盖信息
+        archive_info = cls_telegraph.get("archive", {})
+        if not archive_info:
+            # 尝试直接读取归档文件
+            archive_info = _read_telegraph_archive()
+
+        # v2.0: 从归档中补充全天红色电报（归档可能比本次采集覆盖更长时间段）
+        archive_all_items = _get_archive_items()
+        if archive_all_items:
+            archive_red = [it for it in archive_all_items if it.get("is_red")]
+            # 补充本次采集中没有的归档红色电报
+            existing_red_titles = {it.get("title", "") for it in red_items}
+            extra_red = [it for it in archive_red
+                         if it.get("title", "") not in existing_red_titles]
+            all_red = red_items + extra_red
+            # 按时间排序，取最近30条
+            all_red.sort(key=lambda x: x.get("time", 0), reverse=True)
+        else:
+            all_red = red_items
+
         chapter["cls_telegraph"] = {
             "total_count": cls_telegraph.get("count", len(items)),
-            "red_count": len(red_items),
+            "red_count": len(all_red),
             "red_items": [
                 {
                     "title": it.get("title", ""),
                     "content": it.get("content", ""),
                     "stocks": it.get("stocks", []),
+                    "time": it.get("time", 0),
                 }
-                for it in red_items[:30]  # 最多30条红色电报
+                for it in all_red[:30]  # 最多30条红色电报
             ],
             "all_items_sample": [
                 {
@@ -220,10 +316,13 @@ def extract_chapter0_cls(data):
                     "content": it.get("content", "")[:100],
                     "is_red": it.get("is_red", False),
                     "stocks": it.get("stocks", []),
+                    "time": it.get("time", 0),
                 }
                 for it in items[:50]  # 前50条作为样本
             ],
             "hot_stocks": hot_stocks,
+            # v2.0: 归档信息（全天覆盖统计）
+            "archive": archive_info if archive_info else "数据暂缺",
             "source": "cls_api",
         }
     else:

@@ -896,6 +896,9 @@ def fetch_news_headlines(data_quality, trade_date):
 def fetch_cls_telegraph(data_quality):
     """获取财联社电报（24小时加红）
     使用 /api/cache 接口，无需签名
+
+    v2.0: 采集后自动归档到 data/cls_telegraph_archive/YYYY-MM-DD.json，
+    与之前归档中的电报去重合并，实现全天电报覆盖。
     """
     result = {}
     headers = {
@@ -931,8 +934,13 @@ def fetch_cls_telegraph(data_quality):
                     'stocks': [s.get('name', '') for s in stock_list if isinstance(s, dict)],
                 })
 
+            # v2.0: 归档电报（增量去重合并）
+            archive_stats = archive_cls_telegraph(items)
+
             result['items'] = items
             result['count'] = len(items)
+            # v2.0: 附加归档信息
+            result['archive'] = archive_stats
             record_quality(data_quality, "财联社电报", "OK", "cls_api", len(items))
         else:
             raise ValueError("电报数据为空")
@@ -942,6 +950,93 @@ def fetch_cls_telegraph(data_quality):
         result['error'] = str(e)
 
     return result
+
+
+def archive_cls_telegraph(new_items):
+    """将新采集的电报归档到 data/cls_telegraph_archive/YYYY-MM-DD.json
+
+    v2.0: 增量归档机制
+    - 读取当日已有归档（从git仓库中获取，跨任务共享）
+    - 按 ctime 时间戳去重合并
+    - 写回归档文件，供后续 push 时 git commit + push 到 GitHub
+
+    Args:
+        new_items: 本次采集的电报列表，每个元素含 time(ctime) 字段
+
+    Returns:
+        dict: 归档统计信息
+            - archive_date: 归档日期 YYYY-MM-DD
+            - new_count: 本次新增条数
+            - archive_total: 当日归档总条数
+            - archive_earliest: 当日最早电报时间
+            - archive_latest: 当日最新电报时间
+            - archive_path: 归档文件路径
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    archive_dir = os.path.join(script_dir, "data", "cls_telegraph_archive")
+    os.makedirs(archive_dir, exist_ok=True)
+
+    today_str = datetime.datetime.now().strftime('%Y-%m-%d')
+    archive_path = os.path.join(archive_dir, f"{today_str}.json")
+
+    # 读取已有归档
+    existing_items = []
+    if os.path.exists(archive_path):
+        try:
+            with open(archive_path, 'r', encoding='utf-8') as f:
+                archive_data = json.load(f)
+                existing_items = archive_data.get('items', [])
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"[WARN] 读取电报归档失败，将重新创建: {e}")
+            existing_items = []
+
+    # 按 ctime 去重合并
+    existing_times = {item.get('time', 0) for item in existing_items}
+    truly_new = [item for item in new_items if item.get('time', 0) not in existing_times]
+
+    merged_items = existing_items + truly_new
+    # 按时间排序
+    merged_items.sort(key=lambda x: x.get('time', 0))
+
+    # 写回归档
+    archive_data = {
+        'date': today_str,
+        'total_count': len(merged_items),
+        'items': merged_items,
+        'last_updated': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    }
+    try:
+        with open(archive_path, 'w', encoding='utf-8') as f:
+            json.dump(archive_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[WARN] 写入电报归档失败: {e}")
+
+    # 计算统计信息
+    all_times = [item.get('time', 0) for item in merged_items if item.get('time', 0)]
+    earliest = min(all_times) if all_times else 0
+    latest = max(all_times) if all_times else 0
+
+    def ts_to_str(ts):
+        if not ts:
+            return "N/A"
+        try:
+            return datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return str(ts)
+
+    stats = {
+        'archive_date': today_str,
+        'new_count': len(truly_new),
+        'archive_total': len(merged_items),
+        'archive_earliest': ts_to_str(earliest),
+        'archive_latest': ts_to_str(latest),
+        'archive_path': archive_path,
+    }
+
+    print(f"[OK] 电报归档: 新增 {len(truly_new)} 条, 当日累计 {len(merged_items)} 条")
+    print(f"     时间范围: {stats['archive_earliest']} ~ {stats['archive_latest']}")
+
+    return stats
 
 
 def _cls_sign(params):
