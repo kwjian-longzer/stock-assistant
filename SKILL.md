@@ -43,9 +43,9 @@ stock-assistant/
 步骤0:   git clone（拉取最新代码）
          → git clone https://...github.com/kwjian-longzer/stock-assistant.git /workspace/stock-assistant
 
-步骤0.5: 财联社浏览器采集（JS渲染页面，Python无法直接抓取）
-         → 使用浏览器工具访问4个财联社页面，提取页面文本
-         → 保存到 data/cls_pages.json
+步骤0.5: 财联社浏览器采集（可选，API优先）
+         → fetch_data.py优先使用API直接采集深度头条/VIP/投资日历/首页
+         → API采集失败时降级到浏览器采集（保存到 data/cls_pages.json）
          → 电报由fetch_data.py通过API直接获取，无需浏览器
 
 步骤1:   python fetch_data.py [morning|noon|evening]
@@ -129,10 +129,10 @@ stock-assistant/
 | **人民日报** | **网页抓取** | **http://paper.people.com.cn/rmrb/pc/layout/YYYYMM/DD/node_01.html** | `<a>` 标签文本，UTF-8编码 | 无替代，标记 FAILED |
 | **新闻联播** | **网页抓取** | **https://tv.cctv.cn/lm/xwlb/day/YYYYMMDD.shtml** | `<a title="标题">` 属性提取 | 无替代，标记 FAILED |
 | **财联社电报** | **CLS API** | **https://www.cls.cn/api/cache?app=CailianpressWeb&name=telegraph&os=web&sv=8.7.9** | JSON格式，roll_data数组，含title/content/color/stock_list | 无需签名，直接HTTP请求 |
-| **财联社深度头条** | **浏览器采集** | **https://www.cls.cn/depth?id=1000** | JS渲染，需浏览器提取document.body.innerText | 保存到data/cls_pages.json |
-| **财联社VIP文章** | **浏览器采集** | **https://www.cls.cn/vip** | JS渲染，需浏览器提取document.body.innerText | 保存到data/cls_pages.json |
-| **财联社投资日历** | **浏览器采集** | **https://www.cls.cn/investkalendar** | JS渲染，需浏览器提取document.body.innerText | 保存到data/cls_pages.json |
-| **财联社首页** | **浏览器采集** | **https://www.cls.cn/** | JS渲染，需浏览器提取document.body.innerText | 保存到data/cls_pages.json |
+| **财联社深度头条** | **CLS API** | **/v3/depth/home/assembled/1000** | JSON格式，depth_list含title/brief/ctime/article_tag | 浏览器采集降级 |
+| **财联社VIP文章** | **CLS API** | **/featured/v1/home/assembled + /featured/v2/home/recommend/article** | JSON格式，recommend_list/free_top_v2/yellow_article | 浏览器采集降级 |
+| **财联社投资日历** | **CLS API** | **/api/calendar/web/list** | JSON格式，list含calendar_day/items | 浏览器采集降级 |
+| **财联社首页** | **CLS API** | **/v2/article/hot/list** | JSON格式，list含title/brief/ctime/stocks | 浏览器采集降级 |
 | 资金流向 | Tushare moneyflow | - | - | 无替代，标记 FAILED |
 | 龙虎榜 | Tushare top_list + top_inst | - | - | 无替代，标记 FAILED |
 | **融资融券** | **Tushare margin** | - | - | **当天空数据自动回滚前5天** |

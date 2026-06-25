@@ -27,6 +27,8 @@ import datetime
 import time
 import traceback
 import subprocess
+import hashlib
+import urllib.parse
 
 import requests
 
@@ -942,49 +944,269 @@ def fetch_cls_telegraph(data_quality):
     return result
 
 
-def fetch_cls_pages(data_quality):
-    """获取财联社深度头条、VIP文章、投资日历
-    这些页面是JS渲染，需要浏览器工具提取
-    自动化任务中AI会使用浏览器工具保存内容到 data/cls_pages.json
-    此函数读取该文件，如果不存在则标记为FAILED
+def _cls_sign(params):
+    """财联社API签名算法: sort params by key -> urlencode -> SHA1 -> MD5"""
+    sorted_params = dict(sorted(params.items()))
+    query_string = urllib.parse.urlencode(sorted_params)
+    sha1_hash = hashlib.sha1(query_string.encode('utf-8')).hexdigest()
+    sign = hashlib.md5(sha1_hash.encode('utf-8')).hexdigest()
+    return sign
+
+
+def _cls_api_get(path, extra_params=None, base='https://www.cls.cn'):
+    """调用财联社API（自动签名）
+
+    Args:
+        path: API路径，如 /v3/depth/home/assembled/1000
+        extra_params: 额外参数dict
+        base: 基础URL
+
+    Returns:
+        dict: API返回的JSON数据，失败返回None
+    """
+    params = {'app': 'CailianpressWeb', 'os': 'web', 'sv': '8.7.9'}
+    if extra_params:
+        params.update(extra_params)
+    sign = _cls_sign(params)
+    params['sign'] = sign
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.cls.cn/',
+        'Accept': 'application/json, text/plain, */*',
+    }
+
+    try:
+        resp = requests.get(f"{base}{path}", params=params, headers=headers, timeout=15)
+        data = resp.json()
+        if data.get('error') == 0 or data.get('errno') == 0 or 'data' in data:
+            return data.get('data')
+        else:
+            print(f"  [CLS API] {path} 返回错误: {data.get('msg', data.get('error', '未知'))}")
+            return None
+    except Exception as e:
+        print(f"  [CLS API] {path} 请求失败: {e}")
+        return None
+
+
+def fetch_cls_pages_via_api(data_quality):
+    """通过财联社API直接采集深度头条、VIP文章、投资日历、首页热门文章
+    替代浏览器采集方案，无需JS渲染
+
+    API端点:
+      - 深度头条: /v3/depth/home/assembled/1000
+      - VIP文章: /featured/v1/home/assembled + /featured/v2/home/recommend/article
+      - 投资日历: /api/calendar/web/list
+      - 首页热门: /v2/article/hot/list
     """
     result = {}
-    cls_pages_file = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                   "data", "cls_pages.json")
 
-    if os.path.exists(cls_pages_file):
-        try:
-            with open(cls_pages_file, 'r', encoding='utf-8') as f:
-                pages = json.load(f)
-
-            for page_name, content in pages.items():
-                if content and len(content) > 100:
-                    # 提取文章列表
-                    articles = _parse_cls_page_text(content, page_name)
-                    result[page_name] = {
-                        'raw_text': content[:8000],  # 保留前8000字符
-                        'articles': articles,
-                        'article_count': len(articles),
-                    }
-                    record_quality(data_quality, f"财联社-{page_name}", "OK",
-                                   "browser_scrape", len(articles))
-                else:
-                    result[page_name] = {'error': '内容为空或过短'}
-                    record_quality(data_quality, f"财联社-{page_name}", "FAILED",
-                                   "browser_scrape", 0, "内容为空")
-        except Exception as e:
-            print(f"[WARN] 财联社页面数据读取失败: {e}")
-            record_quality(data_quality, "财联社页面", "FAILED", "browser_scrape",
-                           0, str(e))
-            result['error'] = str(e)
+    # === 1. 深度头条 ===
+    print("  [CLS API] 采集深度头条...")
+    depth_data = _cls_api_get('/v3/depth/home/assembled/1000')
+    if depth_data and isinstance(depth_data, dict):
+        depth_list = depth_data.get('depth_list', [])
+        top_articles = depth_data.get('top_article', [])
+        articles = []
+        for art in depth_list:
+            articles.append({
+                'title': art.get('title', ''),
+                'brief': art.get('brief', '')[:300],
+                'ctime': art.get('ctime', 0),
+                'tag': art.get('article_tag', ''),
+                'source': art.get('source', ''),
+                'reading_num': art.get('reading_num', 0),
+                'image': art.get('image', ''),
+            })
+        for art in top_articles:
+            articles.append({
+                'title': art.get('title', ''),
+                'brief': art.get('brief', '')[:300],
+                'ctime': art.get('ctime', 0),
+                'tag': '置顶',
+                'source': art.get('source', ''),
+                'reading_num': art.get('reading_num', 0),
+                'image': art.get('img', ''),
+            })
+        result['深度头条'] = {
+            'articles': articles,
+            'article_count': len(articles),
+            'source': 'cls_api',
+        }
+        record_quality(data_quality, "财联社-深度头条", "OK", "cls_api", len(articles))
+        print(f"    深度头条: {len(articles)} 篇")
     else:
-        print("[INFO] 财联社浏览器采集数据不存在（data/cls_pages.json），跳过")
-        for page_name in ['深度头条', 'VIP文章', '投资日历', '首页']:
-            result[page_name] = {'error': '浏览器采集数据不存在'}
-            record_quality(data_quality, f"财联社-{page_name}", "FAILED",
-                           "browser_scrape", 0, "cls_pages.json不存在")
+        result['深度头条'] = {'error': 'API采集失败'}
+        record_quality(data_quality, "财联社-深度头条", "FAILED", "cls_api", 0, "API返回空")
+
+    # === 2. VIP文章 ===
+    print("  [CLS API] 采集VIP文章...")
+    vip_data = _cls_api_get('/featured/v1/home/assembled')
+    vip_articles = []
+    if vip_data and isinstance(vip_data, dict):
+        # recommend_list: 推荐文章
+        for art in vip_data.get('recommend_list', []):
+            vip_articles.append({
+                'title': art.get('title', ''),
+                'brief': art.get('brief', '')[:300],
+                'type': art.get('type_name', ''),
+                'reading_num': art.get('reading_num', 0),
+                'unlock': art.get('unlock', False),
+                'label': art.get('label', ''),
+            })
+        # free_top_v2: 免费置顶（含相关股票）
+        for art in vip_data.get('free_top_v2', []):
+            vip_articles.append({
+                'title': art.get('title', ''),
+                'brief': art.get('brief', '')[:300],
+                'type': art.get('type_name', ''),
+                'related_stock': art.get('related_stock', ''),
+                'label': art.get('label', ''),
+            })
+        # yellow_article: 黄V文章
+        for art in vip_data.get('yellow_article', []):
+            vip_articles.append({
+                'title': art.get('title', ''),
+                'brief': '',
+                'type': '黄V',
+                'article_id': art.get('article_id', ''),
+            })
+
+    # VIP推荐文章（补充）
+    import time as _time
+    last_time = str(int(_time.time()))
+    recommend_data = _cls_api_get('/featured/v2/home/recommend/article',
+                                   {'last_time': last_time, 'refresh_Type': '1'})
+    if recommend_data and isinstance(recommend_data, list):
+        for art in recommend_data:
+            vip_articles.append({
+                'title': art.get('title', ''),
+                'brief': art.get('brief', '')[:300],
+                'type': art.get('type_name', ''),
+                'reading_num': art.get('reading_num', 0),
+                'unlock': art.get('unlock', False),
+            })
+
+    if vip_articles:
+        # 提取热门股票
+        hot_stocks = []
+        for art in vip_articles:
+            related = art.get('related_stock', '')
+            if related:
+                for s in related.split(','):
+                    s = s.strip()
+                    if s:
+                        hot_stocks.append(s)
+
+        result['VIP文章'] = {
+            'articles': vip_articles[:30],
+            'article_count': len(vip_articles),
+            'hot_stocks': list(set(hot_stocks))[:20],
+            'source': 'cls_api',
+        }
+        record_quality(data_quality, "财联社-VIP文章", "OK", "cls_api", len(vip_articles))
+        print(f"    VIP文章: {len(vip_articles)} 篇")
+    else:
+        result['VIP文章'] = {'error': 'API采集失败'}
+        record_quality(data_quality, "财联社-VIP文章", "FAILED", "cls_api", 0, "API返回空")
+
+    # === 3. 投资日历 ===
+    print("  [CLS API] 采集投资日历...")
+    calendar_data = _cls_api_get('/api/calendar/web/list', {'flag': '0', 'type': '0'})
+    if calendar_data and isinstance(calendar_data, list):
+        events = []
+        for day_data in calendar_data:
+            calendar_day = day_data.get('calendar_day', '')
+            week = day_data.get('week', '')
+            day_items = day_data.get('items', [])
+            for item in day_items:
+                events.append({
+                    'date': calendar_day,
+                    'week': week,
+                    'event': item.get('title', item.get('content', ''))[:200],
+                    'type': item.get('type', ''),
+                    'stock': item.get('stock', ''),
+                })
+        result['投资日历'] = {
+            'events': events,
+            'event_count': len(events),
+            'source': 'cls_api',
+        }
+        record_quality(data_quality, "财联社-投资日历", "OK", "cls_api", len(events))
+        print(f"    投资日历: {len(events)} 条事件")
+    else:
+        result['投资日历'] = {'error': 'API采集失败'}
+        record_quality(data_quality, "财联社-投资日历", "FAILED", "cls_api", 0, "API返回空")
+
+    # === 4. 首页热门文章 ===
+    print("  [CLS API] 采集首页热门文章...")
+    hot_data = _cls_api_get('/v2/article/hot/list')
+    if hot_data and isinstance(hot_data, list):
+        articles = []
+        for art in hot_data:
+            articles.append({
+                'title': art.get('title', ''),
+                'brief': art.get('brief', '')[:200],
+                'ctime': art.get('ctime', 0),
+                'readNum': art.get('readNum', 0),
+                'author': art.get('author', ''),
+                'stocks': art.get('stocks', ''),
+            })
+        result['首页'] = {
+            'articles': articles,
+            'article_count': len(articles),
+            'source': 'cls_api',
+        }
+        record_quality(data_quality, "财联社-首页", "OK", "cls_api", len(articles))
+        print(f"    首页热门: {len(articles)} 篇")
+    else:
+        result['首页'] = {'error': 'API采集失败'}
+        record_quality(data_quality, "财联社-首页", "FAILED", "cls_api", 0, "API返回空")
 
     return result
+
+
+def fetch_cls_pages(data_quality):
+    """获取财联社深度头条、VIP文章、投资日历、首页
+
+    优先使用API直接采集（无需浏览器），降级到浏览器采集的cls_pages.json
+    """
+    # 优先尝试API采集
+    print("  [CLS] 尝试API直接采集...")
+    api_result = fetch_cls_pages_via_api(data_quality)
+
+    # 检查API采集结果，如果有任何一项失败，尝试浏览器降级
+    failed_pages = []
+    for page_name in ['深度头条', 'VIP文章', '投资日历', '首页']:
+        if page_name not in api_result or 'error' in api_result.get(page_name, {}):
+            failed_pages.append(page_name)
+
+    if failed_pages:
+        print(f"  [CLS] API采集失败的页面: {failed_pages}，尝试浏览器降级...")
+        cls_pages_file = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "data", "cls_pages.json")
+        if os.path.exists(cls_pages_file):
+            try:
+                with open(cls_pages_file, 'r', encoding='utf-8') as f:
+                    pages = json.load(f)
+
+                for page_name, content in pages.items():
+                    if page_name in failed_pages and content and len(content) > 100:
+                        articles = _parse_cls_page_text(content, page_name)
+                        api_result[page_name] = {
+                            'raw_text': content[:8000],
+                            'articles': articles,
+                            'article_count': len(articles),
+                            'source': 'browser_fallback',
+                        }
+                        record_quality(data_quality, f"财联社-{page_name}", "DEGRADED",
+                                       "browser_fallback", len(articles),
+                                       "API失败，降级到浏览器采集")
+                        print(f"    {page_name}: 浏览器降级 {len(articles)} 条")
+            except Exception as e:
+                print(f"  [CLS] 浏览器降级也失败: {e}")
+
+    return api_result
 
 
 def _parse_cls_page_text(text, page_type):
