@@ -18,14 +18,18 @@ import argparse
 import subprocess
 import requests
 
+# 统一配置管理：从环境变量或 config.json 读取敏感信息
+from settings import get_feishu_webhook, get_feishu_app_config
+
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-# 默认 Webhook（硬编码，确保新会话中也能使用）
-DEFAULT_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/bf897c28-ab6c-4da0-9926-dc214a5f1c0b"
+# 默认 Webhook（从 settings.py 统一读取：环境变量优先，其次 config.json）
+DEFAULT_WEBHOOK = get_feishu_webhook()
 
-# 默认飞书应用凭证（硬编码，确保新会话中也能使用）
-DEFAULT_APP_ID = "cli_aabeb7dc9a78dcb5"
-DEFAULT_APP_SECRET = "pgh5y8ILHKYaSdjduOYF6dQVdUrxgewr"
+# 默认飞书应用凭证（从 settings.py 统一读取：环境变量优先，其次 config.json）
+_feishu_app_config = get_feishu_app_config()
+DEFAULT_APP_ID = _feishu_app_config["app_id"]
+DEFAULT_APP_SECRET = _feishu_app_config["app_secret"]
 
 # 飞书 Open API 基础 URL
 FEISHU_BASE = "https://open.feishu.cn/open-apis"

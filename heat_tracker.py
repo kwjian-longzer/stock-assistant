@@ -33,6 +33,9 @@ import sys
 from collections import defaultdict, Counter
 from datetime import datetime, timedelta
 
+# 统一配置管理：从环境变量或 config.json 读取敏感信息
+from settings import get_tushare_token
+
 # 权重
 W_CAPITAL = 0.6
 W_LIMIT = 0.4
@@ -655,7 +658,7 @@ def generate_heat_report_section(pro=None, stock_basic_list=None, sectors_config
     """
     if pro is None:
         ts = _ensure_tushare()
-        ts.set_token("8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365")
+        ts.set_token(get_tushare_token())
         pro = ts.pro_api()
 
     if stock_basic_list is None:
@@ -674,7 +677,7 @@ if __name__ == "__main__":
     print("=== 热度追踪器 v2 测试 ===\n")
 
     ts = _ensure_tushare()
-    ts.set_token("8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365")
+    ts.set_token(get_tushare_token())
     pro = ts.pro_api()
 
     from vip_extractor import load_stock_database
@@ -700,7 +703,7 @@ def export_heat_data_json(output_path=None, pro=None, stock_basic_list=None, sec
     """
     if pro is None:
         ts = _ensure_tushare()
-        ts.set_token("8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365")
+        ts.set_token(get_tushare_token())
         pro = ts.pro_api()
 
     if stock_basic_list is None:

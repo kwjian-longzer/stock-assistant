@@ -32,6 +32,9 @@ import urllib.parse
 
 import requests
 
+# 统一配置管理：从环境变量或 config.json 读取敏感信息
+from settings import get_tushare_token
+
 # ---------------------------------------------------------------------------
 # 依赖自动安装（确保新会话中也能运行）
 # ---------------------------------------------------------------------------
@@ -55,7 +58,7 @@ _ensure_package("requests")
 # 全局配置
 # ---------------------------------------------------------------------------
 
-TUSHARE_TOKEN = "8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365"
+TUSHARE_TOKEN = get_tushare_token()
 
 SINA_HEADERS = {
     "User-Agent": (
@@ -1750,7 +1753,7 @@ def fetch_weekly_data():
                 pro = None
                 try:
                     import tushare as ts
-                    ts.set_token("8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365")
+                    ts.set_token(get_tushare_token())
                     pro = ts.pro_api()
                 except Exception:
                     pass

@@ -18,10 +18,13 @@ import time
 import json
 import sys
 
+# 统一配置管理：从环境变量或 config.json 读取敏感信息
+from settings import get_tushare_token
+
 # ============================================================================
 # 配置
 # ============================================================================
-TUSHARE_TOKEN = "8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365"
+TUSHARE_TOKEN = get_tushare_token()
 NEED_DAYS = 60          # 获取60个交易日日线数据(需>=56天用于EMA55计算)
 API_DELAY = 0.35        # API调用间隔(秒)，避免频率限制
 

@@ -22,11 +22,13 @@ gold_stock_backtest.py - 金股推荐回测系统
 
 import argparse
 import json
-import os
 import re
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
+
+# 统一配置管理：从环境变量或 config.json 读取敏感信息
+from settings import get_tushare_token
 
 # ---------------------------------------------------------------------------
 # 路径与常量
@@ -36,11 +38,8 @@ PROJECT_ROOT = Path(__file__).parent.resolve()
 HISTORY_DIR = PROJECT_ROOT / "docs" / "data" / "history"
 GOLD_STOCKS_PATH = HISTORY_DIR / "gold_stocks.json"
 
-# Tushare API Token
-TUSHARE_TOKEN = os.environ.get(
-    "TUSHARE_TOKEN",
-    "8eaad9971749da18299f4932a7cabf068a495fdf06ef3aaafebfe365",
-)
+# Tushare API Token（从 settings.py 统一读取：环境变量优先，其次 config.json）
+TUSHARE_TOKEN = get_tushare_token()
 
 # 回测周期（交易日）
 BACKTEST_DAYS = [1, 3, 5, 10, 20]
