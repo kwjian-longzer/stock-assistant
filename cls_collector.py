@@ -23,10 +23,12 @@
   python cls_collector.py --telegraph  # 只采集电报
   python cls_collector.py --vip         # 只采集VIP文章+股票发现
   python cls_collector.py --stats       # 查看数据库统计
+  python cls_collector.py --poll        # 高频轮询模式（每3分钟采集电报，持续55分钟）
 
 定时任务设置:
   Schedule cron: 0 * * * * (每小时整点)
-  命令: python /workspace/stock-assistant/cls_collector.py
+  命令: python /workspace/stock-assistant/cls_collector.py --poll
+  说明: --poll 模式内部循环55分钟（每3分钟轮询一次），解决CLS API固定返回20条的问题
 """
 
 import argparse
@@ -297,18 +299,41 @@ def extract_sector_tags(text: str) -> str:
 # 电报采集
 # ---------------------------------------------------------------------------
 
+def _fetch_telegraph_page(last_time: int = None) -> list:
+    """获取一页电报数据（20条）
+
+    Args:
+        last_time: 如果提供，使用 name=telegraphList&lastTime 获取该时间之后的新电报
+                   如果为None，使用 name=telegraph 获取最新20条
+
+    Returns:
+        list: 电报原始数据列表
+    """
+    if last_time is None:
+        data = _cls_api_get('/api/cache', {'name': 'telegraph'})
+    else:
+        data = _cls_api_get('/api/cache', {'name': 'telegraphList', 'lastTime': str(last_time)})
+
+    if data is None:
+        return []
+
+    if isinstance(data, dict):
+        return data.get('roll_data', [])
+    return []
+
+
 def collect_telegraphs(db: DB) -> dict:
     """采集财联社电报，结构化后写入数据库
+
+    CLS /api/cache 端点固定返回最新20条，无法向后翻页。
+    解决方案：高频轮询（每3分钟一次），通过 telegraph_id 去重累积全量数据。
 
     Returns:
         dict: {fetched, new_count, skipped_count, red_count}
     """
     print("\n[电报] 开始采集...")
     try:
-        url = "https://www.cls.cn/api/cache?app=CailianpressWeb&name=telegraph&os=web&sv=" + _CLS_DEFAULT_SV
-        resp = requests.get(url, headers=_CLS_HEADERS, timeout=15)
-        data = resp.json()
-        roll_data = data.get('data', {}).get('roll_data', [])
+        roll_data = _fetch_telegraph_page()
     except Exception as e:
         print(f"[电报] 采集失败: {e}")
         return {"fetched": 0, "new_count": 0, "skipped_count": 0, "red_count": 0}
@@ -765,6 +790,100 @@ def collect_investment_calendar(db: DB) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# 高频轮询模式 — 解决CLS API固定返回20条的问题
+# ---------------------------------------------------------------------------
+
+def run_poll_mode(db: DB, interval: int = 180, duration: int = 3300,
+                  collect_vip_too: bool = False) -> None:
+    """持续轮询模式：每隔 interval 秒采集一次电报，持续 duration 秒
+
+    CLS /api/cache 端点固定返回最新20条，无向后翻页能力。
+    解决方案：每3分钟轮询一次，通过 telegraph_id 去重，1小时内累积全量电报。
+
+    Schedule cron 每小时触发一次，脚本内部循环55分钟后退出，
+    下一次 cron 触发时自动接力。
+
+    Args:
+        db: 数据库实例
+        interval: 轮询间隔秒数（默认180=3分钟）
+        duration: 总持续时间秒数（默认3300=55分钟，留5分钟缓冲）
+        collect_vip_too: 是否在首次轮询时也采集VIP/深度/日历
+    """
+    start_time = time.time()
+    poll_count = 0
+    total_new = 0
+    total_red = 0
+
+    # 首次轮询：可选采集其他数据源
+    vip_done = not collect_vip_too
+
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed >= duration:
+            break
+
+        poll_count += 1
+        now_str = datetime.datetime.now().strftime("%H:%M:%S")
+        remaining_min = int((duration - elapsed) / 60)
+
+        print(f"\n{'='*60}")
+        print(f"轮询 #{poll_count} | {now_str} | 已运行 {int(elapsed//60)}min | 剩余 ~{remaining_min}min")
+        print(f"累计新增: {total_new} 条 | 红色: {total_red} 条")
+        print(f"{'='*60}")
+
+        # 采集电报
+        result = collect_telegraphs(db)
+        total_new += result['new_count']
+        total_red += result['red_count']
+
+        # 首次轮询时采集其他数据源
+        if not vip_done:
+            try:
+                collect_vip_articles(db)
+                collect_depth_articles(db)
+                collect_investment_calendar(db)
+            except Exception as e:
+                print(f"[其他数据源] 采集失败: {e}")
+            vip_done = True
+
+        # 显示今日电报统计
+        stats = db.query_telegraph_stats()
+        if stats['total'] > 0:
+            if stats['earliest_ts']:
+                earliest = datetime.datetime.fromtimestamp(stats['earliest_ts'])
+                latest = datetime.datetime.fromtimestamp(stats['latest_ts'])
+                span_h = (stats['latest_ts'] - stats['earliest_ts']) / 3600
+                print(f"[统计] 今日电报: {stats['total']} 条 | "
+                      f"红色: {stats['red_count']} | "
+                      f"覆盖: {earliest.strftime('%H:%M')}~{latest.strftime('%H:%M')} ({span_h:.1f}h)")
+            else:
+                print(f"[统计] 今日电报: {stats['total']} 条 | 红色: {stats['red_count']}")
+
+        # 计算睡眠时间
+        sleep_time = interval - (time.time() - start_time - elapsed)
+        remaining = duration - (time.time() - start_time)
+        if remaining <= 0:
+            break
+        sleep_time = min(max(sleep_time, 10), remaining)
+
+        next_time = datetime.datetime.now() + datetime.timedelta(seconds=int(sleep_time))
+        print(f"[等待] {int(sleep_time)}秒后下次轮询 (预计 {next_time.strftime('%H:%M:%S')})")
+        time.sleep(sleep_time)
+
+    # 最终统计
+    print(f"\n{'='*60}")
+    print(f"轮询结束 | 共 {poll_count} 次 | 新增 {total_new} 条 | 红色 {total_red} 条")
+    final_stats = db.query_telegraph_stats()
+    print(f"今日电报总计: {final_stats['total']} 条 | 红色: {final_stats['red_count']}")
+    if final_stats['earliest_ts']:
+        earliest = datetime.datetime.fromtimestamp(final_stats['earliest_ts'])
+        latest = datetime.datetime.fromtimestamp(final_stats['latest_ts'])
+        span_h = (final_stats['latest_ts'] - final_stats['earliest_ts']) / 3600
+        print(f"覆盖时间: {earliest.strftime('%H:%M')}~{latest.strftime('%H:%M')} ({span_h:.1f}h)")
+    print(f"{'='*60}")
+
+
+# ---------------------------------------------------------------------------
 # 主入口
 # ---------------------------------------------------------------------------
 
@@ -774,6 +893,13 @@ def main():
     parser.add_argument('--vip', action='store_true', help='只采集VIP文章')
     parser.add_argument('--depth', action='store_true', help='只采集深度头条')
     parser.add_argument('--calendar', action='store_true', help='只采集投资日历')
+    parser.add_argument('--poll', action='store_true',
+                        help='持续轮询模式：每3分钟采集电报，持续55分钟'
+                             '（解决CLS API固定返回20条的问题）')
+    parser.add_argument('--interval', type=int, default=180,
+                        help='轮询间隔秒数（默认180=3分钟）')
+    parser.add_argument('--duration', type=int, default=3300,
+                        help='轮询持续秒数（默认3300=55分钟）')
     parser.add_argument('--stats', action='store_true', help='查看数据库统计')
     parser.add_argument('--resonance', action='store_true', help='查看当日共振分析')
     args = parser.parse_args()
@@ -810,6 +936,17 @@ def main():
             print(f"    数据源: {', '.join(stock['sources'])} ({stock['source_count']}个)")
             for k, v in stock['details'].items():
                 print(f"    {k}: {v}")
+        return
+
+    # 轮询模式：高频采集电报（解决CLS API固定返回20条的问题）
+    if args.poll:
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"{'='*60}")
+        print(f"财联社电报高频轮询模式 — {now_str}")
+        print(f"间隔: {args.interval}秒 | 持续: {args.duration}秒 ({args.duration//60}分钟)")
+        print(f"{'='*60}")
+        run_poll_mode(db, interval=args.interval, duration=args.duration,
+                      collect_vip_too=True)
         return
 
     # 默认采集全部
