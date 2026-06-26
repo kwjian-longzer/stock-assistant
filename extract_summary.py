@@ -1568,6 +1568,15 @@ def main():
             "data_reference": "chapter3.moneyflow_aggregate + chapter_qsq.selected_stocks + chapter_qsq.two_of_three_stocks + chapter_vip.vip_stocks",
         }
 
+        # v3.1: Agent洞见提取 — 从数据库结构化电报中提取市场推理信号
+        print("  [6/7] 提取Agent洞见（盘前信号→跨市场映射）...")
+        try:
+            from insight_extractor import generate_insight_data
+            summary["insights"] = generate_insight_data()
+        except Exception as e:
+            print(f"  [WARN] 洞见提取失败: {e}")
+            summary["insights"] = {"error": str(e)}
+
     # 确定输出文件
     if args.output:
         output_file = args.output

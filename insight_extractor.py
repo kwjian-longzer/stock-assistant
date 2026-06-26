@@ -155,7 +155,104 @@ def generate_cross_market_mapping(signals: dict) -> list:
 
 
 def generate_insight_report(date: str = None) -> str:
-    """生成完整的洞见报告"""
+    """生成完整的洞见报告（文本格式，供终端输出）"""
+    data = generate_insight_data(date)
+    if "error" in data:
+        return data["error"]
+
+    report = []
+    report.append(f"{'='*70}")
+    report.append(f"Agent洞见报告 — {data['date']}")
+    report.append(f"{'='*70}")
+    report.append(f"电报总数: {data['telegraph_total']} | 提取信号: {data['signal_total']} | 跨市场映射: {len(data['mappings'])}")
+
+    # 信号分类统计
+    report.append(f"\n{'─'*50}")
+    report.append("【一、信号分类统计】")
+    report.append(f"{'─'*50}")
+    for cat, items in data['signals'].items():
+        if items:
+            report.append(f"  {cat}: {len(items)} 条")
+
+    # 海外市场信号
+    report.append(f"\n{'─'*50}")
+    report.append("【二、海外市场信号（影响A股开盘情绪）】")
+    report.append(f"{'─'*50}")
+    for sig in data['signals'].get('overseas_market', []):
+        impact_icon = {"high": "🔴", "medium": "🟡", "low": "⚪"}.get(sig['impact_level'], "⚪")
+        report.append(f"  {impact_icon} [{sig['time']}] {sig['title']}")
+        report.append(f"      情感:{sig['sentiment']} 影响:{sig['impact_level']} 板块:{sig['sector_tags']}")
+
+    # 商品信号
+    report.append(f"\n{'─'*50}")
+    report.append("【三、商品市场信号】")
+    report.append(f"{'─'*50}")
+    for sig in data['signals'].get('commodity', []):
+        impact_icon = {"high": "🔴", "medium": "🟡", "low": "⚪"}.get(sig['impact_level'], "⚪")
+        report.append(f"  {impact_icon} [{sig['time']}] {sig['title']}")
+
+    # 宏观信号
+    report.append(f"\n{'─'*50}")
+    report.append("【四、宏观信号】")
+    report.append(f"{'─'*50}")
+    for sig in data['signals'].get('macro', []):
+        report.append(f"  [{sig['time']}] {sig['title']}")
+
+    # 跨市场映射
+    report.append(f"\n{'─'*50}")
+    report.append("【五、跨市场映射预判（核心洞见）】")
+    report.append(f"{'─'*50}")
+    if data['mappings']:
+        for m in data['mappings']:
+            conf_icon = {"high": "🔴", "medium": "🟡", "low": "⚪"}.get(m['confidence'], "⚪")
+            report.append(f"  {conf_icon} {m['signal']}")
+            report.append(f"      → A股影响: {m['a_share_impact']} (置信度:{m['confidence']})")
+    else:
+        report.append("  无跨市场映射信号")
+
+    # 关键缺失检查
+    report.append(f"\n{'─'*50}")
+    report.append("【六、关键信号缺失检查】")
+    report.append(f"{'─'*50}")
+    for name, status in data['missing_check'].items():
+        report.append(f"  {name}: {status}")
+
+    # A股个股信号
+    report.append(f"\n{'─'*50}")
+    report.append("【七、A股个股信号】")
+    report.append(f"{'─'*50}")
+    for sig in data['signals'].get('a_share_individual', []):
+        report.append(f"  [{sig['time']}] {sig['title']}")
+        report.append(f"      事件:{sig['event_type']} 情感:{sig['sentiment']}")
+
+    report.append(f"\n{'='*70}")
+    return "\n".join(report)
+
+
+def generate_insight_data(date: str = None) -> dict:
+    """生成结构化洞见数据（供 extract_summary.py 嵌入 data_summary.json）
+
+    返回dict格式，Agent写报告时可直接引用：
+    {
+        "date": "2026-06-26",
+        "telegraph_total": 20,
+        "signal_total": 17,
+        "telegraph_coverage": "13:50~14:27 (0.6h)",
+        "signals": {
+            "overseas_market": [...],
+            "commodity": [...],
+            "macro": [...],
+            "a_share_individual": [...],
+            "geopolitical": [...],
+        },
+        "mappings": [
+            {"signal": "...", "a_share_impact": "...", "confidence": "high"},
+        ],
+        "missing_check": {"韩国/熔断": "❌ 未覆盖", ...},
+        "sentiment_summary": {"positive": 7, "negative": 2, "neutral": 11},
+        "hot_sectors": [{"tag": "半导体", "count": 3}, ...],
+    }
+    """
     if date is None:
         date = datetime.datetime.now().strftime("%Y-%m-%d")
 
@@ -163,69 +260,40 @@ def generate_insight_report(date: str = None) -> str:
     telegraphs = db.query_telegraphs(date=date, limit=500)
 
     if not telegraphs:
-        return f"⚠️ {date} 无电报数据，请先运行 cls_collector.py 采集"
+        return {
+            "date": date,
+            "error": f"⚠️ {date} 无电报数据，请先运行 cls_collector.py 采集",
+            "telegraph_total": 0,
+            "signal_total": 0,
+        }
 
     signals = extract_market_signals(telegraphs)
     mappings = generate_cross_market_mapping(signals)
 
-    # 统计
-    total = len(telegraphs)
-    all_signals = sum(len(v) for v in signals.values())
-
-    report = []
-    report.append(f"{'='*70}")
-    report.append(f"Agent洞见报告 — {date}")
-    report.append(f"{'='*70}")
-    report.append(f"电报总数: {total} | 提取信号: {all_signals} | 跨市场映射: {len(mappings)}")
-
-    # 1. 信号分类统计
-    report.append(f"\n{'─'*50}")
-    report.append("【一、信号分类统计】")
-    report.append(f"{'─'*50}")
-    for cat, items in signals.items():
-        if items:
-            report.append(f"  {cat}: {len(items)} 条")
-
-    # 2. 海外市场信号
-    report.append(f"\n{'─'*50}")
-    report.append("【二、海外市场信号（影响A股开盘情绪）】")
-    report.append(f"{'─'*50}")
-    for sig in signals.get("overseas_market", []):
-        impact_icon = {"high": "🔴", "medium": "🟡", "low": "⚪"}.get(sig["impact_level"], "⚪")
-        report.append(f"  {impact_icon} [{sig['time']}] {sig['title']}")
-        report.append(f"      情感:{sig['sentiment']} 影响:{sig['impact_level']} 板块:{sig['sector_tags']}")
-
-    # 3. 商品信号
-    report.append(f"\n{'─'*50}")
-    report.append("【三、商品市场信号】")
-    report.append(f"{'─'*50}")
-    for sig in signals.get("commodity", []):
-        impact_icon = {"high": "🔴", "medium": "🟡", "low": "⚪"}.get(sig["impact_level"], "⚪")
-        report.append(f"  {impact_icon} [{sig['time']}] {sig['title']}")
-
-    # 4. 宏观信号
-    report.append(f"\n{'─'*50}")
-    report.append("【四、宏观信号】")
-    report.append(f"{'─'*50}")
-    for sig in signals.get("macro", []):
-        report.append(f"  [{sig['time']}] {sig['title']}")
-
-    # 5. 跨市场映射
-    report.append(f"\n{'─'*50}")
-    report.append("【五、跨市场映射预判（核心洞见）】")
-    report.append(f"{'─'*50}")
-    if mappings:
-        for m in mappings:
-            conf_icon = {"high": "🔴", "medium": "🟡", "low": "⚪"}.get(m["confidence"], "⚪")
-            report.append(f"  {conf_icon} {m['signal']}")
-            report.append(f"      → A股影响: {m['a_share_impact']} (置信度:{m['confidence']})")
+    # 时间覆盖范围
+    timestamps = [t.get("timestamp", 0) for t in telegraphs if t.get("timestamp")]
+    if timestamps:
+        earliest = datetime.datetime.fromtimestamp(min(timestamps))
+        latest = datetime.datetime.fromtimestamp(max(timestamps))
+        span = (max(timestamps) - min(timestamps)) / 3600
+        coverage = f"{earliest.strftime('%H:%M')}~{latest.strftime('%H:%M')} ({span:.1f}h)"
     else:
-        report.append("  无跨市场映射信号")
+        coverage = "N/A"
 
-    # 6. 关键缺失检查
-    report.append(f"\n{'─'*50}")
-    report.append("【六、关键信号缺失检查】")
-    report.append(f"{'─'*50}")
+    # 情感统计
+    from collections import Counter
+    sentiment_summary = dict(Counter(t.get("sentiment", "neutral") for t in telegraphs))
+
+    # 热门板块标签
+    all_tags = []
+    for t in telegraphs:
+        tags = t.get("sector_tags", "")
+        if tags:
+            all_tags.extend([s.strip() for s in tags.split(",") if s.strip()])
+    tag_counter = Counter(all_tags)
+    hot_sectors = [{"tag": tag, "count": cnt} for tag, cnt in tag_counter.most_common(10)]
+
+    # 关键缺失检查
     all_titles = " ".join(t.get("title", "") for t in telegraphs)
     critical_kws = {
         "韩国/熔断": ["韩国", "KOSPI", "熔断"],
@@ -235,21 +303,37 @@ def generate_insight_report(date: str = None) -> str:
         "OpenAI": ["OpenAI", "IPO"],
         "英伟达": ["英伟达", "NVIDIA"],
     }
+    missing_check = {}
     for name, kws in critical_kws.items():
         found = any(kw in all_titles for kw in kws)
-        status = "✅ 已覆盖" if found else "❌ 未覆盖"
-        report.append(f"  {name}: {status}")
+        missing_check[name] = "✅ 已覆盖" if found else "❌ 未覆盖"
 
-    # 7. A股个股信号
-    report.append(f"\n{'─'*50}")
-    report.append("【七、A股个股信号】")
-    report.append(f"{'─'*50}")
-    for sig in signals.get("a_share_individual", []):
-        report.append(f"  [{sig['time']}] {sig['title']}")
-        report.append(f"      事件:{sig['event_type']} 情感:{sig['sentiment']}")
+    # 高影响信号（impact_level=high）
+    high_impact_signals = [
+        {
+            "time": datetime.datetime.fromtimestamp(t["timestamp"]).strftime("%H:%M"),
+            "title": t["title"][:80],
+            "event_type": t.get("event_type", ""),
+            "sentiment": t.get("sentiment", ""),
+        }
+        for t in telegraphs
+        if t.get("impact_level") == "high"
+    ]
 
-    report.append(f"\n{'='*70}")
-    return "\n".join(report)
+    all_signals_count = sum(len(v) for v in signals.values())
+
+    return {
+        "date": date,
+        "telegraph_total": len(telegraphs),
+        "signal_total": all_signals_count,
+        "telegraph_coverage": coverage,
+        "signals": signals,
+        "mappings": mappings,
+        "missing_check": missing_check,
+        "sentiment_summary": sentiment_summary,
+        "hot_sectors": hot_sectors,
+        "high_impact_signals": high_impact_signals,
+    }
 
 
 if __name__ == "__main__":
