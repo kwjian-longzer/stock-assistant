@@ -23,12 +23,14 @@
   python cls_collector.py --telegraph  # 只采集电报
   python cls_collector.py --vip         # 只采集VIP文章+股票发现
   python cls_collector.py --stats       # 查看数据库统计
-  python cls_collector.py --poll        # 高频轮询模式（每3分钟采集电报，持续55分钟）
+  python cls_collector.py --poll        # 持续轮询模式（每15分钟采集，持续55分钟）
 
 定时任务设置:
   Schedule cron: 0 * * * * (每小时整点)
   命令: python /workspace/stock-assistant/cls_collector.py --poll
-  说明: --poll 模式内部循环55分钟（每3分钟轮询一次），解决CLS API固定返回20条的问题
+  说明: --poll 模式内部循环55分钟，每15分钟调用一次 collect_telegraphs()
+        collect_telegraphs() 使用 /v1/roll/get_roll_list?category=red 端点
+        向后翻页回填24小时红色电报（通常2-3页即可覆盖全天）
 """
 
 import argparse
@@ -299,57 +301,67 @@ def extract_sector_tags(text: str) -> str:
 # 电报采集
 # ---------------------------------------------------------------------------
 
-def _fetch_telegraph_page(last_time: int = None) -> list:
-    """获取一页电报数据（20条）
+def _fetch_telegraph_page_red(last_time: int = None, rn: int = 50) -> list:
+    """获取一页红色（加红）电报数据
+
+    使用 /v1/roll/get_roll_list?category=red 端点：
+    - category=red: 只返回加红的重要电报
+    - last_time + refresh_type=1: 向后翻页（获取last_time之前的电报）
+    - rn: 每页条数（最大50）
 
     Args:
-        last_time: 如果提供，使用 name=telegraphList&lastTime 获取该时间之后的新电报
-                   如果为None，使用 name=telegraph 获取最新20条
+        last_time: 时间戳，获取该时间之前的电报。None=获取最新一批
+        rn: 每页条数（默认50）
 
     Returns:
         list: 电报原始数据列表
     """
-    if last_time is None:
-        data = _cls_api_get('/api/cache', {'name': 'telegraph'})
-    else:
-        data = _cls_api_get('/api/cache', {'name': 'telegraphList', 'lastTime': str(last_time)})
-
+    params = {
+        'category': 'red',
+        'refresh_type': '1',
+        'rn': str(rn),
+        'last_time': str(last_time if last_time else int(time.time())),
+    }
+    data = _cls_api_get('/v1/roll/get_roll_list', params)
     if data is None:
         return []
-
     if isinstance(data, dict):
         return data.get('roll_data', [])
     return []
 
 
-def collect_telegraphs(db: DB) -> dict:
-    """采集财联社电报，结构化后写入数据库
+def _fetch_telegraph_page_all(last_time: int = None) -> list:
+    """获取一页全部电报数据（含非加红）
 
-    CLS /api/cache 端点固定返回最新20条，无法向后翻页。
-    解决方案：高频轮询（每3分钟一次），通过 telegraph_id 去重累积全量数据。
+    使用 /api/cache?name=telegraph 端点（固定返回最新20条，无向后翻页）。
+    仅用于补充最新电报，历史数据靠红色电报端点覆盖。
 
     Returns:
-        dict: {fetched, new_count, skipped_count, red_count}
+        list: 电报原始数据列表
     """
-    print("\n[电报] 开始采集...")
-    try:
-        roll_data = _fetch_telegraph_page()
-    except Exception as e:
-        print(f"[电报] 采集失败: {e}")
-        return {"fetched": 0, "new_count": 0, "skipped_count": 0, "red_count": 0}
+    data = _cls_api_get('/api/cache', {'name': 'telegraph'})
+    if data is None:
+        return []
+    if isinstance(data, dict):
+        return data.get('roll_data', [])
+    return []
 
-    if not roll_data:
-        print("[电报] 无数据")
-        return {"fetched": 0, "new_count": 0, "skipped_count": 0, "red_count": 0}
 
-    print(f"[电报] API返回 {len(roll_data)} 条")
+def _process_telegraph_items(db: DB, items: list) -> dict:
+    """处理电报列表：结构化分析 + 写入数据库
 
+    Args:
+        db: 数据库实例
+        items: 电报原始数据列表
+
+    Returns:
+        dict: {new_count, skipped_count, red_count}
+    """
     new_count = 0
     skipped = 0
     red_count = 0
 
-    for item in roll_data:
-        # 提取字段
+    for item in items:
         telegraph_id = str(item.get('id', ''))
         if not telegraph_id:
             continue
@@ -357,8 +369,9 @@ def collect_telegraphs(db: DB) -> dict:
         title = (item.get('title', '') or '').strip()
         content = (item.get('content', '') or '').strip()
         ctime = int(item.get('ctime', 0))
-        is_red = 1 if (item.get('color', '') == 'red' or
-                        item.get('level', '') == 'red') else 0
+        # level=B 表示加红重要电报
+        level = item.get('level', '')
+        is_red = 1 if level in ('A', 'B') else 0
         stock_list = item.get('stock_list', [])
 
         if not title and content:
@@ -404,12 +417,98 @@ def collect_telegraphs(db: DB) -> dict:
         else:
             skipped += 1
 
-    print(f"[电报] 采集完成: 新增 {new_count} 条, 跳过 {skipped} 条(已存在), 红色 {red_count} 条")
     return {
-        "fetched": len(roll_data),
         "new_count": new_count,
         "skipped_count": skipped,
         "red_count": red_count,
+    }
+
+
+def collect_telegraphs(db: DB, lookback_hours: int = 24) -> dict:
+    """采集财联社电报，结构化后写入数据库
+
+    使用 /v1/roll/get_roll_list?category=red 端点：
+    - category=red 只采集加红重要电报（过滤非重要信息）
+    - last_time + refresh_type=1 支持向后翻页，一次调用回填全天数据
+    - rn=50 每页50条，通常2-3页即可覆盖24小时
+
+    同时补充最新全部电报（/api/cache?name=telegraph）以覆盖非加红但刚发布的电报。
+
+    Args:
+        db: 数据库实例
+        lookback_hours: 回看小时数（默认24小时）
+
+    Returns:
+        dict: {fetched, new_count, skipped_count, red_count}
+    """
+    print(f"\n[电报] 开始采集（红色电报向后翻页，回看{lookback_hours}h）...")
+
+    all_items = []
+    seen_ids = set()
+
+    # === 第一步：采集红色重要电报（向后翻页） ===
+    current_time = int(time.time())
+    cutoff_time = current_time - lookback_hours * 3600
+    last_time = current_time
+    page = 0
+
+    while last_time > cutoff_time:
+        page += 1
+        items = _fetch_telegraph_page_red(last_time=last_time, rn=50)
+
+        if not items:
+            print(f"[电报] 红色电报第{page}页: 无数据，停止翻页")
+            break
+
+        new_items = [it for it in items if str(it.get('id')) not in seen_ids]
+        for it in items:
+            seen_ids.add(str(it.get('id')))
+
+        all_items.extend(new_items)
+
+        # 获取最旧时间戳
+        ctimes = [int(it.get('ctime', 0)) for it in items if it.get('ctime')]
+        if not ctimes:
+            break
+        oldest = min(ctimes)
+        newest = max(ctimes)
+
+        print(f"[电报] 红色电报第{page}页: {len(items)}条 ({len(new_items)}新), "
+              f"{time.strftime('%H:%M', time.localtime(oldest))}~{time.strftime('%H:%M', time.localtime(newest))}")
+
+        if len(new_items) == 0:
+            print(f"[电报] 无新条目，停止翻页")
+            break
+
+        last_time = oldest
+        time.sleep(0.5)  # 礼貌间隔
+
+    print(f"[电报] 红色电报共 {len(all_items)} 条")
+
+    # === 第二步：补充最新全部电报（含非加红） ===
+    latest_items = _fetch_telegraph_page_all()
+    latest_new = [it for it in latest_items if str(it.get('id')) not in seen_ids]
+    if latest_new:
+        print(f"[电报] 最新全部电报补充: {len(latest_new)} 条新（非加红）")
+        all_items.extend(latest_new)
+
+    if not all_items:
+        print("[电报] 无数据")
+        return {"fetched": 0, "new_count": 0, "skipped_count": 0, "red_count": 0}
+
+    print(f"[电报] 总计 {len(all_items)} 条待处理")
+
+    # === 第三步：结构化处理 + 写入数据库 ===
+    result = _process_telegraph_items(db, all_items)
+
+    print(f"[电报] 采集完成: 新增 {result['new_count']} 条, "
+          f"跳过 {result['skipped_count']} 条(已存在), 红色 {result['red_count']} 条")
+
+    return {
+        "fetched": len(all_items),
+        "new_count": result['new_count'],
+        "skipped_count": result['skipped_count'],
+        "red_count": result['red_count'],
     }
 
 
@@ -790,22 +889,24 @@ def collect_investment_calendar(db: DB) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 高频轮询模式 — 解决CLS API固定返回20条的问题
+# 持续轮询模式 — 定时采集 + 全量回填
 # ---------------------------------------------------------------------------
 
-def run_poll_mode(db: DB, interval: int = 180, duration: int = 3300,
+def run_poll_mode(db: DB, interval: int = 900, duration: int = 3300,
                   collect_vip_too: bool = False) -> None:
     """持续轮询模式：每隔 interval 秒采集一次电报，持续 duration 秒
 
-    CLS /api/cache 端点固定返回最新20条，无向后翻页能力。
-    解决方案：每3分钟轮询一次，通过 telegraph_id 去重，1小时内累积全量电报。
+    新方案：使用 /v1/roll/get_roll_list?category=red 向后翻页，
+    每次调用即可回填24小时红色电报，无需高频轮询。
 
-    Schedule cron 每小时触发一次，脚本内部循环55分钟后退出，
-    下一次 cron 触发时自动接力。
+    默认间隔15分钟（900秒），因为：
+    - 红色电报频率约5-10条/小时
+    - 每次调用回填24h，不会遗漏
+    - 15分钟间隔足够及时，且对服务器友好
 
     Args:
         db: 数据库实例
-        interval: 轮询间隔秒数（默认180=3分钟）
+        interval: 轮询间隔秒数（默认900=15分钟）
         duration: 总持续时间秒数（默认3300=55分钟，留5分钟缓冲）
         collect_vip_too: 是否在首次轮询时也采集VIP/深度/日历
     """
@@ -831,8 +932,8 @@ def run_poll_mode(db: DB, interval: int = 180, duration: int = 3300,
         print(f"累计新增: {total_new} 条 | 红色: {total_red} 条")
         print(f"{'='*60}")
 
-        # 采集电报
-        result = collect_telegraphs(db)
+        # 采集电报（向后翻页回填24h红色电报 + 最新全部电报补充）
+        result = collect_telegraphs(db, lookback_hours=24)
         total_new += result['new_count']
         total_red += result['red_count']
 
@@ -894,10 +995,10 @@ def main():
     parser.add_argument('--depth', action='store_true', help='只采集深度头条')
     parser.add_argument('--calendar', action='store_true', help='只采集投资日历')
     parser.add_argument('--poll', action='store_true',
-                        help='持续轮询模式：每3分钟采集电报，持续55分钟'
-                             '（解决CLS API固定返回20条的问题）')
-    parser.add_argument('--interval', type=int, default=180,
-                        help='轮询间隔秒数（默认180=3分钟）')
+                        help='持续轮询模式：每15分钟采集电报，持续55分钟'
+                             '（红色电报向后翻页回填24h）')
+    parser.add_argument('--interval', type=int, default=900,
+                        help='轮询间隔秒数（默认900=15分钟）')
     parser.add_argument('--duration', type=int, default=3300,
                         help='轮询持续秒数（默认3300=55分钟）')
     parser.add_argument('--stats', action='store_true', help='查看数据库统计')
