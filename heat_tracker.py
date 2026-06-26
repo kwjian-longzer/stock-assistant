@@ -665,16 +665,14 @@ def generate_heat_report_section(pro=None, stock_basic_list=None, sectors_config
         from vip_extractor import load_stock_database
         stock_basic_list = load_stock_database(pro)
 
-    if sectors_config is None:
-        sectors_config = DEFAULT_SECTORS
-
+    # v3: sectors_config=None时动态选择前线热点板块（不传DEFAULT_SECTORS）
     result = compute_sector_heat_comparison(pro, stock_basic_list, sectors_config, days=days)
     return result["chart_text"]
 
 
 if __name__ == "__main__":
     # 测试
-    print("=== 热度追踪器 v2 测试 ===\n")
+    print("=== 热度追踪器 v3 测试（动态选板块） ===\n")
 
     ts = _ensure_tushare()
     ts.set_token(get_tushare_token())
@@ -683,8 +681,8 @@ if __name__ == "__main__":
     from vip_extractor import load_stock_database
     stock_db = load_stock_database(pro)
 
-    # 使用默认板块配置
-    chart = generate_heat_report_section(pro, stock_db, DEFAULT_SECTORS, days=28)
+    # v3: 不传sectors_config，自动动态选择前线热点
+    chart = generate_heat_report_section(pro, stock_db, days=28)
     print(chart)
 
 
@@ -710,9 +708,7 @@ def export_heat_data_json(output_path=None, pro=None, stock_basic_list=None, sec
         from vip_extractor import load_stock_database
         stock_basic_list = load_stock_database(pro)
 
-    if sectors_config is None:
-        sectors_config = DEFAULT_SECTORS
-
+    # v3: sectors_config=None时动态选择前线热点板块
     result = compute_sector_heat_comparison(pro, stock_basic_list, sectors_config, days=days)
 
     # 构建JSON数据（ECharts友好格式）

@@ -877,54 +877,12 @@ def push_to_feishu(file_path):
     base_name = os.path.basename(file_path)
     date_str = base_name.split('_')[0] if '_' in base_name else ""
 
-    qsq_md_path = generate_qsq_md_report(qsq_json_path, date_str)
+    # --- v3.0: 飞书只推链接+简报卡片，不再推送全文MD文件 ---
+    # 全文报告通过网站查看: https://kwjian-longzer.github.io/stock-assistant/
+    # site_builder会将报告转为JSON写入docs/data/，git push后GitHub Pages自动部署
 
-    # --- v2.0: 准备VIP信息表MD文件 ---
-    vip_md_path = generate_vip_md_from_summary(data_dir, date_str)
-
-    # --- 步骤1: 通过 Open API 发送文件 ---
-    print("\n[步骤1] 通过Open API发送文件...")
-    token = get_tenant_access_token()
-    file_sent = False
-    qsq_sent = False
-    vip_sent = False
-
-    if token:
-        print(f"[OK] 获取 tenant_access_token 成功")
-        chat_id = find_target_chat(token)
-
-        if chat_id:
-            # 发送主报告文件
-            file_key = upload_file(token, file_path)
-            if file_key:
-                file_sent = send_file_message(token, chat_id, file_key)
-
-            # 发送钱三强选股结果文件
-            if qsq_md_path and os.path.exists(qsq_md_path):
-                print(f"\n  [1.1] 发送钱三强选股结果文件...")
-                qsq_file_key = upload_file(token, qsq_md_path)
-                if qsq_file_key:
-                    qsq_sent = send_file_message(token, chat_id, qsq_file_key)
-            else:
-                print(f"  [SKIP] 钱三强选股结果文件不存在，跳过")
-
-            # v2.0: 发送VIP信息表文件
-            if vip_md_path and os.path.exists(vip_md_path):
-                print(f"\n  [1.2] 发送VIP信息表文件...")
-                vip_file_key = upload_file(token, vip_md_path)
-                if vip_file_key:
-                    vip_sent = send_file_message(token, chat_id, vip_file_key)
-            else:
-                print(f"  [SKIP] VIP信息表文件不存在，跳过")
-    else:
-        print("[WARN] 无法获取 tenant_access_token，跳过文件发送")
-        print("       可能原因：")
-        print("       1. App ID / App Secret 未配置或错误")
-        print("       2. 网络连接问题")
-        print("       3. 应用未发布或未启用机器人能力")
-
-    # --- 步骤2: 通过 Webhook 发送重要提醒+金股摘要 ---
-    print(f"\n[步骤2] 通过Webhook发送重要提醒+金股摘要...")
+    # --- 步骤1: 通过 Webhook 发送链接+简报卡片 ---
+    print("\n[步骤1] 通过Webhook发送链接+简报卡片...")
     webhook_sent = send_summary_via_webhook(file_path)
 
     # --- 步骤3: v3.0 网站数据生成 ---

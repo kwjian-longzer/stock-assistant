@@ -278,6 +278,12 @@ def calculate_returns(price_series, base_price):
     # 提取收盘价序列
     closes = [r["close"] for r in price_series]
 
+    # v3修复: 如果只有1条数据（仅推荐日当天），无法计算任何收益率
+    if len(closes) < 2:
+        print(f"[提示] 仅1条价格数据，无法计算收益率（推荐日=T+0，需T+1才有对比数据）")
+        result["current_price"] = round(closes[0], 4)
+        return result
+
     # 当前价（序列最后一日）
     result["current_price"] = round(closes[-1], 4)
 
@@ -415,6 +421,19 @@ def run_backtest(days_filter=None):
                 print(f"[跳过] 推荐日 {first_recommended} 早于筛选截止日 {cutoff_date}")
                 skip_count += 1
                 continue
+
+        # v3修复: T+1逻辑 — 跳过推荐日为今天的金股（当天收盘后才有数据，无法回测）
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        if first_recommended == today_str:
+            print(f"[跳过] 推荐日 {first_recommended} 为今天，尚无后续交易日数据（T+1回测）")
+            skip_count += 1
+            continue
+
+        # v3修复: 也跳过推荐日为昨天的（如果昨天是今天的前一个自然日但Tushare数据尚未更新）
+        yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        if first_recommended == yesterday_str:
+            # 尝试回测，但如果只拿到1条数据（推荐日本身），则跳过
+            pass  # 不跳过，让backtest_single_stock内部处理
 
         # 执行回测
         try:
