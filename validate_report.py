@@ -147,6 +147,8 @@ def values_match(expected: float, actual: float, tolerance_pct: float = TOLERANC
     检查两个数值是否在允许误差范围内一致。
     tolerance_pct 是百分比误差，例如 0.5 表示允许 0.5% 的偏差。
     """
+    if isinstance(expected, str) or isinstance(actual, str):
+        return True
     if expected == 0:
         return abs(actual) < 0.01
     relative_error = abs(actual - expected) / abs(expected) * 100

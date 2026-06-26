@@ -641,6 +641,7 @@ def extract_chapter1(data):
 def extract_chapter2(data):
     """提取第二章需要的数据: 机构买卖、北向资金、融资融券、龙虎榜个股"""
     chapter = {}
+    top_list = data.get("top_list", [])
 
     # --- 2.1 机构净买入/卖出 TOP5 ---
     top_inst = data.get("top_inst", [])
