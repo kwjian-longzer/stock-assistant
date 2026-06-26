@@ -1,7 +1,8 @@
-# 工作交接单（v2）
+# 工作交接单（v3）
 
 > 创建时间: 2026-06-26
-> 最新commit: 2dba213
+> 最新更新: 2026-06-26 (v3.2)
+> 最新commit: 40de9b8
 > 交接对象: 全新环境中的Agent
 > 前置文档: SKILL.md（项目宪法）、SESSION_SUMMARY.md（任务对照表）
 
@@ -191,26 +192,44 @@ cls_telegraph表额外字段:
 
 **文件**: `cls_collector.py`（已创建并验证）
 **定时任务**: `0 * * * *`（每小时整点）
+**命令**: `python cls_collector.py --poll`（每15分钟轮询，持续55分钟）
 
 采集内容：
-1. **电报** — CLS API `/api/cache?name=telegraph`，结构化后写入cls_telegraph表
-   - NLP分类：event_type（6类关键词匹配）、sentiment（正负面关键词）、impact_level（红色标记+高影响关键词）、sector_tags（40+行业标签）
+1. **电报** — v3.2使用 `/v1/roll/get_roll_list?category=red` 端点
+   - **关键发现**: 点击CLS网页"加红"按钮时浏览器调用此端点
+   - `category=red`: 只返回加红重要电报（`level=B`），过滤非重要信息
+   - `last_time` + `refresh_type=1`: **支持向后翻页**（与`/api/cache`完全不同！）
+   - `rn=50`: 单次返回50条，3页翻页即可覆盖24小时
+   - 同时补充 `/api/cache?name=telegraph` 获取最新非加红电报
+   - NLP分类：event_type（7类）、sentiment（正负面+否定语境）、impact_level（红色+关键词+百分比提取）、sector_tags（80+标签）
 2. **VIP文章** — CLS API分页采集83篇，写入cls_vip_article表
    - 双层股票发现：Tushare主营业务搜索 + 发现报告API搜索
    - 结果写入vip_discovered_stock表
 3. **深度头条** — CLS API，存入raw_cache
 4. **投资日历** — CLS API，存入raw_cache
 
+**CLS电报API端点对比**（v3.2关键决策）：
+
+| 端点 | 条数 | 向后翻页 | category | 用途 |
+|------|------|---------|----------|------|
+| `/api/cache?name=telegraph` | 20 | ❌ | ❌ | 取最新非加红 |
+| `/api/cache?name=telegraphList&lastTime=X` | 20 | ❌(前向轮询) | ❌ | 取更新 |
+| `/nodeapi/telegraphList` | — | — | — | ❌ 404已移除 |
+| **`/v1/roll/get_roll_list?category=red`** | **50** | **✅** | **✅** | **主力端点** |
+
 **命令行参数**：
 ```bash
 python cls_collector.py              # 采集全部
-python cls_collector.py --telegraph  # 只采集电报
+python cls_collector.py --telegraph  # 只采集电报（红色端点+向后翻页）
 python cls_collector.py --vip         # 只采集VIP文章
+python cls_collector.py --poll        # 持续轮询模式（每15分钟，持续55分钟）
 python cls_collector.py --stats       # 查看数据库统计
 python cls_collector.py --resonance   # 查看当日共振分析
 ```
 
-验证结果：83篇VIP文章 + 361只发现股票入库。
+**关于Chrome桌面通知**: 调研确认CLS"桌面通知"是HTTP轮询+Notification API，非服务器推送，无VAPID/WebSocket/SSE，不可利用。
+
+验证结果：一次调用获取168条电报（144条红色），覆盖24小时。
 
 #### P0-3: ⏳ 待完成 — 改造 fetch_data.py 走 db.py
 
@@ -378,15 +397,17 @@ sector_tags   = extract_sector_tags(text)  # 半导体/新能源/医药/...
 |------|------|---------|
 | `settings.py` | 统一配置管理 | ✅含get_fxbaogao_api_key() |
 | `fetch_data.py` | 数据采集主脚本 | ⏳需改造走db.py |
-| `extract_summary.py` | 数据摘要提取 | ⏳需加字段级时间戳+查库 |
+| `extract_summary.py` | 数据摘要提取 | ✅v3.2: 注入insights字段 |
 | `heat_tracker.py` | 热度量化追踪 | v3动态选板块已修复 |
 | `vip_extractor.py` | VIP股票发现 | ✅含fxbaogao二层搜索 |
 | `site_builder.py` | 报告→网站JSON | |
 | `gold_stock_backtest.py` | 金股回测 | T+1逻辑已修复 |
 | `push_feishu.py` | 飞书推送 | v3只推卡片 |
 | `validate_report.py` | 12条红线校验 | |
-| `cls_collector.py` | **财联社独立采集** | ✅已创建，每小时定时 |
+| `cls_collector.py` | **财联社独立采集** | ✅v3.2: 红色电报端点+向后翻页 |
 | `db.py` | **SQLite缓存层** | ✅已创建，12张表 |
+| `insight_extractor.py` | **Agent洞见引擎** | ✅v3.2新增，5类信号+跨市场映射 |
+| `report_quality_evaluator.py` | 10维度评分 | |
 
 ### 网站文件
 
@@ -408,12 +429,19 @@ sector_tags   = extract_sector_tags(text)  # 半导体/新能源/医药/...
 3. ✅ gold_stock_backtest.py: T+1跳过逻辑
 4. ✅ 7个Python文件硬编码Token → settings.py统一管理
 
-### 本次新增（待commit）
+### 本次新增（commit 889e58e ~ 40de9b8）
 5. ✅ db.py: SQLite缓存层（12张表 + get_or_fetch + 共振分析查询）
 6. ✅ cls_collector.py: 财联社独立每小时采集（电报+VIP+深度+日历）
 7. ✅ settings.py: 新增 get_fxbaogao_api_key()
 8. ✅ vip_extractor.py: 新增fxbaogao MCP HTTP API二层股票搜索
 9. ✅ 电报结构化: event_type/sentiment/impact_level/sector_tags NLP字段
+10. ✅ insight_extractor.py: Agent洞见引擎（5类信号+跨市场映射+缺失检查）
+11. ✅ extract_summary.py: 注入insights到data_summary.json
+12. ✅ analysis_prompt.md: 新增7条insights引用规则
+13. ✅ cls_collector.py NLP优化: sector_tags 40→80+, 否定语境检测, 百分比提取
+14. ✅ cls_collector.py: 发现 /v1/roll/get_roll_list?category=red 红色电报端点
+    - 向后翻页回填24h红色电报（之前固定20条的问题彻底解决）
+    - is_red判断修正: level in ('A','B') 而非 color=='red'
 
 ### 已知问题（未修复）
 1. **自动化任务时间错误**: 午报凌晨3:32执行，需修正为11:35
@@ -424,6 +452,8 @@ sector_tags   = extract_sector_tags(text)  # 半导体/新能源/医药/...
 6. **共振分析用本次采集**: extract_summary.py未从数据库查询（P0-6待完成）
 7. ~~VIP股票发现不全~~ → ✅ 已补充fxbaogao API二层搜索
 8. **前端CDN缓存**: latest.json可能被GitHub Pages CDN缓存
+9. ~~CLS API固定返回20条~~ → ✅ v3.2发现 /v1/roll/get_roll_list?category=red 向后翻页
+10. ~~is_red判断错误~~ → ✅ v3.2修正为 level in ('A','B')
 
 ### 历史教训
 1. **子agent验证缺失**: 子agent返回"已完成"后必须实际运行验证
