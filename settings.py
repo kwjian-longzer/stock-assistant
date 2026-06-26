@@ -58,3 +58,12 @@ def get_site_url():
         or _config.get("site_url")
         or "https://kwjian-longzer.github.io/stock-assistant/"
     )
+
+
+def get_fxbaogao_api_key():
+    """获取发现报告(fxbaogao) API Key"""
+    return (
+        os.environ.get("FXBAOGAO_API_KEY")
+        or _config.get("fxbaogao_api_key")
+        or ""
+    )

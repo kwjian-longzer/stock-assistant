@@ -241,6 +241,7 @@ def discover_stocks_by_article(title, brief, related_stock, stock_database, max_
     2. 在stock_company.main_business中全文搜索
     3. 利用related_stock的板块+数量约束过滤
     4. 综合评分排序
+    5. [v3.1新增] 补充发现报告API搜索研报中提及的股票
 
     Args:
         title: 文章标题
@@ -323,6 +324,7 @@ def discover_stocks_by_article(title, brief, related_stock, stock_database, max_
                 "match_score": score,
                 "matched_terms": matched_terms,
                 "market_constraint_applied": bool(required_prefixes),
+                "match_source": "tushare",
             })
 
     # Step 4: 综合评分排序
@@ -333,6 +335,40 @@ def discover_stocks_by_article(title, brief, related_stock, stock_database, max_
         # 取前count个（但保留更多以防数量不足）
         candidates = candidates[:max(total_expected * 2, max_results)]
 
+    # Step 5: [v3.1新增] 补充发现报告API搜索研报中提及的股票
+    # 解决问题：VIP文章关键词（如"PCB镀铜"、"光模块锡粉"）出现在研报和新闻中，
+    # 而非公司介绍资料中，Tushare stock_company.main_business搜索匹配不到。
+    try:
+        from cls_collector import search_fxbaogao
+        fxbaogao_stocks = search_fxbaogao(title, brief)
+        existing_codes = {c["ts_code"] for c in candidates}
+        for stock in fxbaogao_stocks:
+            if stock["code"] in existing_codes:
+                # 合并来源
+                for c in candidates:
+                    if c["ts_code"] == stock["code"]:
+                        c["match_source"] = "both"
+                        c["match_score"] += stock.get("score", 0)
+                continue
+            # 新增fxbaogao发现
+            candidates.append({
+                "ts_code": stock["code"],
+                "name": stock["name"],
+                "industry": stock.get("industry", ""),
+                "symbol": stock["code"].split(".")[0] if "." in stock["code"] else "",
+                "main_business": "",
+                "match_score": stock.get("score", 1),
+                "matched_terms": [stock.get("detail", "研报搜索")],
+                "market_constraint_applied": bool(required_prefixes),
+                "match_source": "fxbaogao",
+            })
+            existing_codes.add(stock["code"])
+    except Exception as e:
+        # 发现报告搜索失败不影响主流程
+        pass
+
+    # 重新排序（fxbaogao结果可能改变排序）
+    candidates.sort(key=lambda x: x["match_score"], reverse=True)
     return candidates[:max_results]
 
 
