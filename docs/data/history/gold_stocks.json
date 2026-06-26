@@ -303,6 +303,60 @@
         "max_return": 0.0,
         "max_drawdown": 0.0
       }
+    },
+    {
+      "name": "广合科技",
+      "code": "001389",
+      "first_recommended": "2026-06-26",
+      "recommendations": [
+        {
+          "date": "2026-06-26",
+          "type": "morning",
+          "reason": "龙虎榜净买入7.37亿，三日涨幅偏离值累计20%，机构资金关注度高",
+          "score": 67
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": null,
+        "current_price": null,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": null,
+        "max_drawdown": null
+      }
+    },
+    {
+      "name": "广合科技",
+      "code": "001389.SZ",
+      "first_recommended": "2026-06-26",
+      "recommendations": [
+        {
+          "date": "2026-06-26",
+          "type": "morning",
+          "reason": "龙虎榜、研报(2/5) | 连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
+          "score": 35
+        },
+        {
+          "date": "2026-06-26",
+          "type": "evening",
+          "reason": "龙虎榜、研报(2/5) | 连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
+          "score": 35
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": null,
+        "current_price": null,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": null,
+        "max_drawdown": null
+      }
     }
   ],
   "last_updated": "2026-06-26"

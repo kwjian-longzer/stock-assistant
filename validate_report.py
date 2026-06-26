@@ -75,8 +75,11 @@ STOCK_CODE_PATTERN = re.compile(
     r'\b(\d{6})\b|(?:\b\d{6}\.(SH|SZ|sh|sz)\b)'
 )
 
-MIN_CHAR_COUNT_DAILY = 6000
-MIN_CHAR_COUNT_WEEKLY = 8000
+# v4.0: 日报字符数要求 2500-4000，周报 6000+
+MIN_CHAR_COUNT_DAILY = 2500
+MIN_CHAR_COUNT_WEEKLY = 6000
+# 日报字符数上限（超过仅提示，不阻断推送）
+MAX_CHAR_COUNT_DAILY = 4000
 
 # 数据一致性允许误差（百分比）
 TOLERANCE_PCT = 0.5
@@ -229,16 +232,22 @@ def check_placeholder(report_text: str) -> tuple[bool, list[str]]:
 
 def get_index_records(summary: dict) -> list[dict]:
     """从 data_summary 中提取指数记录列表。
-    兼容两种格式：
-    - summary['chapter1']['index_summary']（extract_summary.py 输出）
-    - summary['index_daily']（原始格式）
+    兼容三种格式：
+    - v4.0: summary['indices']（扁平结构，含 name/close/pct_chg/amount）
+    - v3.x: summary['chapter1']['index_summary']（extract_summary.py 输出）
+    - 旧格式: summary['index_daily']（原始格式）
     """
-    # 优先从 chapter1.index_summary 读取
+    # v4.0: 优先从扁平 indices 列表读取
+    indices = summary.get('indices')
+    if isinstance(indices, list) and indices:
+        return indices
+    # v3.x: 从 chapter1.index_summary 读取
     ch1 = summary.get('chapter1', {})
-    index_list = ch1.get('index_summary', [])
-    if index_list and isinstance(index_list, list):
-        return index_list
-    # 降级：从 index_daily 读取（旧格式兼容）
+    if isinstance(ch1, dict):
+        index_list = ch1.get('index_summary', [])
+        if index_list and isinstance(index_list, list):
+            return index_list
+    # 旧格式：从 index_daily 读取（兼容）
     index_daily = summary.get('index_daily', {})
     if isinstance(index_daily, dict):
         result = []
@@ -246,6 +255,76 @@ def get_index_records(summary: dict) -> list[dict]:
             if isinstance(records, list) and records:
                 result.extend(records)
         return result
+    return []
+
+
+def get_north_money(summary: dict) -> dict:
+    """从 data_summary 中提取北向资金数据（净额单位：亿元）。
+    兼容：
+    - v4.0: summary['north_money']（扁平 dict，north_money 字段已是亿元，无需转换）
+    - v3.x: summary['chapter2']['north_money']（可能为万元，数值过大时转换为亿元）
+    """
+    # v4.0 扁平结构
+    nm = summary.get('north_money')
+    if isinstance(nm, dict) and 'north_money' in nm:
+        return nm  # north_money 字段已是亿元
+    # v3.x chapter2.north_money
+    ch2 = summary.get('chapter2', {})
+    if isinstance(ch2, dict):
+        nm_v3 = ch2.get('north_money')
+        if isinstance(nm_v3, dict) and 'north_money' in nm_v3:
+            val = nm_v3.get('north_money')
+            if isinstance(val, (int, float)) and abs(val) >= 1000:
+                # v3 可能以万元为单位，转换为亿元
+                return {**nm_v3, 'north_money': val / 10000.0}
+            return nm_v3
+        if isinstance(nm_v3, (int, float)):
+            val = nm_v3 / 10000.0 if abs(nm_v3) >= 1000 else nm_v3
+            return {'north_money': val}
+    return {}
+
+
+def get_limit_up_records(summary: dict) -> list:
+    """从 data_summary 中提取涨停数据列表。
+    兼容：
+    - v4.0: summary['limit_up']（扁平 list）
+    - v3.x: summary['chapter4']['limit_stats']
+    """
+    # v4.0 扁平结构
+    limit_up = summary.get('limit_up')
+    if isinstance(limit_up, list):
+        return limit_up
+    # v3.x chapter4.limit_stats
+    ch4 = summary.get('chapter4', {})
+    if isinstance(ch4, dict):
+        stats = ch4.get('limit_stats')
+        if isinstance(stats, list):
+            return stats
+        if isinstance(stats, dict):
+            # v3 limit_stats 可能是聚合 dict，尝试取出其中的列表字段
+            for key in ('list', 'stocks', 'limit_up_list', 'items'):
+                if isinstance(stats.get(key), list):
+                    return stats[key]
+            return [stats]
+    return []
+
+
+def get_gold_stocks(summary: dict) -> list:
+    """从 data_summary 中提取金股列表。
+    兼容：
+    - v4.0: summary['gold_stocks']（扁平 list，含 code/name/dimensions/score）
+    - v3.x: summary['chapter5']['gold_stocks']
+    """
+    # v4.0 扁平结构
+    gs = summary.get('gold_stocks')
+    if isinstance(gs, list):
+        return gs
+    # v3.x chapter5.gold_stocks
+    ch5 = summary.get('chapter5', {})
+    if isinstance(ch5, dict):
+        gs_v3 = ch5.get('gold_stocks')
+        if isinstance(gs_v3, list):
+            return gs_v3
     return []
 
 
@@ -540,6 +619,93 @@ def check_gold_stock_table(report_text: str) -> tuple[bool, list[str]]:
     return True, []
 
 
+def check_north_money_consistency(report_text: str, summary: dict) -> tuple[bool, list[str]]:
+    """红线13（v4.0新增）：检查北向资金净额一致性。
+
+    v4.0 的 north_money 已为亿元，直接比对报告中"北向资金"附近的净额数值。
+    数据缺失或报告未提及北向资金时跳过（不阻断）。
+    """
+    errors = []
+    nm = get_north_money(summary)
+    expected = nm.get('north_money') if isinstance(nm, dict) else None
+    if not isinstance(expected, (int, float)):
+        return True, []  # 无北向资金数据，跳过
+
+    found_numbers = extract_numbers_near_index(report_text, ['北向资金', '北向', '外资'])
+    if not found_numbers:
+        return True, []  # 报告未提及北向资金，跳过
+
+    # 北向资金允许较宽松误差：1亿元或1%（避免四舍五入导致误报）
+    tol = max(1.0, abs(expected) * 0.01)
+    matched = any(abs(num - expected) <= tol for num in found_numbers)
+    if not matched:
+        closest = min(found_numbers, key=lambda x: abs(x - expected))
+        errors.append(
+            f"北向资金净额不一致: 报告中最接近的值 {closest:.2f}亿，"
+            f"实际应为 {expected:.2f}亿"
+        )
+        return False, errors
+    return True, []
+
+
+def check_limit_up_consistency(report_text: str, summary: dict) -> tuple[bool, list[str]]:
+    """红线14（v4.0新增）：检查涨停数据一致性。
+
+    v4.0 的 limit_up 为扁平 list。数据为空时跳过；
+    非空时校验报告中是否提及对应股票代码/名称。
+    """
+    errors = []
+    records = get_limit_up_records(summary)
+    if not records:
+        return True, []  # 无涨停数据，跳过
+
+    missing = []
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        name = rec.get('name') or ''
+        code = str(rec.get('ts_code') or rec.get('code') or '').split('.')[0]
+        mentioned = bool(name and name in report_text) or (
+            len(code) == 6 and code in report_text
+        )
+        if not mentioned:
+            missing.append(name or code)
+    if missing:
+        errors.append(
+            f"涨停数据中有 {len(missing)} 只股票未在报告中提及: "
+            f"{', '.join(str(m) for m in missing[:5])}"
+        )
+        return False, errors
+    return True, []
+
+
+def check_gold_stock_data(report_text: str, summary: dict) -> tuple[bool, list[str]]:
+    """红线15（v4.0新增）：检查金股数据结构是否符合 v4 格式。
+
+    v4.0 的 gold_stocks 为扁平 list，每项应含 code/name/dimensions/score。
+    数据缺失时跳过（金股数据可能存放在 report_request 而非 data_summary）。
+    """
+    errors = []
+    gold_stocks = get_gold_stocks(summary)
+    if not gold_stocks:
+        return True, []  # 无金股数据，跳过
+
+    required_fields = ['code', 'name', 'dimensions', 'score']
+    malformed = []
+    for i, gs in enumerate(gold_stocks, 1):
+        if not isinstance(gs, dict):
+            malformed.append(f"第{i}项非对象")
+            continue
+        missing_fields = [f for f in required_fields if f not in gs]
+        if missing_fields:
+            label = gs.get('name') or gs.get('code') or f"第{i}项"
+            malformed.append(f"{label} 缺少字段: {','.join(missing_fields)}")
+    if malformed:
+        errors.append(f"金股数据不符合 v4 格式: {'; '.join(malformed)}")
+        return False, errors
+    return True, []
+
+
 def check_chapter_structure(report_text: str) -> tuple[bool, list[str]]:
     """红线6：检查章节结构完整性（v2.0: 含第零章共七组）"""
     errors = []
@@ -582,6 +748,8 @@ def validate(report_path: str, summary_path: str) -> dict:
     """
     执行所有校验规则，返回结构化结果。
     v2.0: 新增红线7-10（热点追踪/龙脉定位/推理链/交叉验证密度）
+    v4.0: 数据格式由 chapter 结构改为扁平结构（indices/north_money/limit_up/gold_stocks）；
+          日报字符数阈值调整为 2500；新增红线13-15（北向资金/涨停/金股数据格式）
     """
     # 加载文件
     report_text = load_report(report_path)
@@ -639,8 +807,27 @@ def validate(report_path: str, summary_path: str) -> dict:
     gold_table_ok, gold_table_errors = check_gold_stock_table(report_text)
     errors.extend(gold_table_errors)
 
+    # 红线13（v4.0新增）：北向资金净额一致性（v4 north_money 已为亿元）
+    north_ok, north_errors = check_north_money_consistency(report_text, summary)
+    errors.extend(north_errors)
+
+    # 红线14（v4.0新增）：涨停数据一致性（v4 limit_up 扁平 list）
+    limit_ok, limit_errors = check_limit_up_consistency(report_text, summary)
+    errors.extend(limit_errors)
+
+    # 红线15（v4.0新增）：金股数据 v4 格式校验（gold_stocks 含 code/name/dimensions/score）
+    gold_data_ok, gold_data_errors = check_gold_stock_data(report_text, summary)
+    errors.extend(gold_data_errors)
+
     # 警告
     warnings.extend(check_warnings(report_text))
+
+    # v4.0: 日报超长提示（不阻断推送）
+    is_weekly_report = '周报' in report_name if report_name else '周报' in report_text
+    if not is_weekly_report and len(report_text) > MAX_CHAR_COUNT_DAILY:
+        warnings.append(
+            f"日报字符数 {len(report_text)}，超过建议上限 {MAX_CHAR_COUNT_DAILY}，建议精简"
+        )
 
     # 统计信息
     stats = {
@@ -655,6 +842,9 @@ def validate(report_path: str, summary_path: str) -> dict:
         'cross_validation_density': cross_ok,
         'heat_curve': heat_ok,
         'gold_stock_table': gold_table_ok,
+        'north_money_consistency': north_ok,
+        'limit_up_consistency': limit_ok,
+        'gold_stock_data_valid': gold_data_ok,
     }
 
     valid = len(errors) == 0
@@ -687,6 +877,9 @@ def print_human_readable(result: dict):
     print(f'  金股龙脉定位:     {"是" if stats.get("dragon_vein_labeled") else "否"}')
     print(f'  推理链完整性:     {"是" if stats.get("reasoning_chain_complete") else "否"}')
     print(f'  交叉验证密度:     {"通过" if stats.get("cross_validation_density") else "不足"}')
+    print(f'  北向资金一致性:   {"通过" if stats.get("north_money_consistency") else "不一致"}')
+    print(f'  涨停数据一致性:   {"通过" if stats.get("limit_up_consistency") else "不一致"}')
+    print(f'  金股数据格式:     {"合规" if stats.get("gold_stock_data_valid") else "不合规"}')
 
     if result['errors']:
         print(f'\n  --- 错误（{len(result["errors"])} 项）---')

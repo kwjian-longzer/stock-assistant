@@ -52,6 +52,75 @@ def load_summary(summary_path):
         return json.load(f)
 
 
+def get_red_telegraph_count(summary):
+    """获取红色电报数量。兼容 v4.0 insights 与 v3.x chapter0_cls。"""
+    if not isinstance(summary, dict):
+        return 0
+    # v3.x: chapter0_cls.cls_telegraph.red_count
+    ch0 = summary.get('chapter0_cls', {})
+    if isinstance(ch0, dict):
+        telegraph = ch0.get('cls_telegraph', {})
+        if isinstance(telegraph, dict) and 'red_count' in telegraph:
+            try:
+                return int(telegraph.get('red_count', 0) or 0)
+            except (TypeError, ValueError):
+                return 0
+    # v4.0: 从 insights 中解析"财联社舆情"信号文本（如"红色0条"）
+    insights = summary.get('insights')
+    if isinstance(insights, list):
+        for item in insights:
+            if not isinstance(item, dict):
+                continue
+            cat = item.get('category', '') or ''
+            text = item.get('signal_text', '') or ''
+            if '财联社' in cat or '舆情' in cat or '电报' in text:
+                m = re.search(r'红色\s*(\d+)\s*条', text)
+                if not m:
+                    m = re.search(r'红色(\d+)', text)
+                if m:
+                    try:
+                        return int(m.group(1))
+                    except (TypeError, ValueError):
+                        return 0
+    return 0
+
+
+def get_north_money_net(summary):
+    """获取北向资金净额（亿元）。兼容 v4.0 扁平 north_money 与 v3.x chapter2。
+    v4.0 的 north_money 字段已为亿元，无需从万元转换。
+    """
+    if not isinstance(summary, dict):
+        return None
+    # v4.0 扁平结构
+    nm = summary.get('north_money')
+    if isinstance(nm, dict) and isinstance(nm.get('north_money'), (int, float)):
+        return nm['north_money']
+    # v3.x chapter2.north_money（可能为万元，数值过大时转换为亿元）
+    ch2 = summary.get('chapter2', {})
+    if isinstance(ch2, dict):
+        nm_v3 = ch2.get('north_money')
+        if isinstance(nm_v3, dict) and isinstance(nm_v3.get('north_money'), (int, float)):
+            val = nm_v3['north_money']
+            return val / 10000.0 if abs(val) >= 1000 else val
+        if isinstance(nm_v3, (int, float)):
+            return nm_v3 / 10000.0 if abs(nm_v3) >= 1000 else nm_v3
+    return None
+
+
+def _extract_numbers_near(report_text, keywords):
+    """在关键词附近 200 字符范围内提取数值（用于数据一致性比对）。"""
+    nums = []
+    for kw in keywords:
+        for m in re.finditer(re.escape(kw), report_text):
+            seg = report_text[m.start():m.start() + 200]
+            for n in re.findall(r'[\d,]+\.?\d*', seg):
+                try:
+                    nums.append(float(n.replace(',', '')))
+                except ValueError:
+                    continue
+    return nums
+
+
 def score_data_truth(report_text, summary):
     """维度1: 数据真实性 (0-10)"""
     score = 10
@@ -96,6 +165,19 @@ def score_data_truth(report_text, summary):
             score -= 3
             issues.append(f"'数据暂缺'出现{missing_count}次，比例过高")
 
+    # v4.0: 北向资金净额一致性（north_money 已为亿元，直接比对，无需万元转换）
+    expected_nm = get_north_money_net(summary)
+    if isinstance(expected_nm, (int, float)):
+        found_nums = _extract_numbers_near(report_text, ['北向资金', '北向', '外资'])
+        if found_nums:
+            tol = max(1.0, abs(expected_nm) * 0.01)
+            if not any(abs(x - expected_nm) <= tol for x in found_nums):
+                score -= 2
+                closest = min(found_nums, key=lambda x: abs(x - expected_nm))
+                issues.append(
+                    f"北向资金净额不一致: 报告约{closest:.2f}亿，数据{expected_nm:.2f}亿"
+                )
+
     return max(0, score), issues
 
 
@@ -104,12 +186,8 @@ def score_signal_depth(report_text, summary):
     score = 0
     issues = []
 
-    # 红色电报分析深度
-    red_telegraph = 0
-    if summary:
-        ch0 = summary.get("chapter0_cls", {})
-        telegraph = ch0.get("cls_telegraph", {})
-        red_telegraph = telegraph.get("red_count", 0)
+    # 红色电报分析深度（v4.0: 兼容 insights 与 v3.x chapter0_cls）
+    red_telegraph = get_red_telegraph_count(summary) if summary else 0
 
     # 报告中是否逐条分析红色电报
     if red_telegraph > 0:
@@ -408,14 +486,21 @@ def score_structure(report_text, summary):
     else:
         issues.append("缺少风险免责声明")
 
-    # 字符数
+    # 字符数（v4.0: 日报 2500-4000 满分，<2500 扣分；周报 6000+ 满分）
     char_count = len(report_text)
     is_weekly = '周报' in report_text
-    min_chars = 8000 if is_weekly else 6000
-    if char_count >= min_chars:
-        score += 2
+    if is_weekly:
+        if char_count >= 6000:
+            score += 2
+        else:
+            issues.append(f"周报字符数{char_count}，低于要求6000")
     else:
-        issues.append(f"字符数{char_count}，低于要求{min_chars}")
+        if 2500 <= char_count <= 4000:
+            score += 2
+        elif char_count < 2500:
+            issues.append(f"日报字符数{char_count}，低于要求2500")
+        else:
+            issues.append(f"日报字符数{char_count}，超过建议上限4000，建议精简")
 
     return min(10, score), issues
 

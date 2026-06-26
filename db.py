@@ -214,6 +214,114 @@ class DB:
             )
         """)
 
+        # 13. 市场洞见（分析引擎输出）
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS market_insight (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                period TEXT NOT NULL,
+                category TEXT,
+                signal_text TEXT,
+                a_share_impact TEXT,
+                confidence TEXT,
+                signal_time TEXT,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+
+        # 14. 报告记录
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS report (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                period TEXT NOT NULL,
+                title TEXT,
+                content TEXT,
+                char_count INTEGER,
+                quality_score REAL,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+
+        # 15. 钱三强选股结果
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS qian_sanqiang_result (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                stock_code TEXT,
+                stock_name TEXT,
+                strategy TEXT,
+                score REAL,
+                detail_json TEXT,
+                fetch_time TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+
+        # 16. 热度追踪
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS heat_tracking (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                sector TEXT,
+                heat_score REAL,
+                capital_flow REAL,
+                limit_up_count INTEGER,
+                lifecycle TEXT,
+                fetch_time TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+
+        # 17. 学习记录
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS learning_record (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                prediction TEXT,
+                actual TEXT,
+                gap_analysis TEXT,
+                lesson TEXT,
+                category TEXT,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+
+        # 18. 网站数据快照
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS website_snapshot (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                period TEXT,
+                snapshot_json TEXT,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+
+        # 19. 财经日历事件
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS calendar_event (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_date TEXT NOT NULL,
+                event_time TEXT,
+                title TEXT,
+                importance TEXT,
+                category TEXT,
+                detail TEXT,
+                fetch_time TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+
+        # gold_stock 扩展字段（ALTER ADD，幂等：仅添加尚不存在的列）
+        self._alter_add_columns(cur, "gold_stock", {
+            "catalyst": "TEXT",
+            "dragon_vein": "TEXT",
+            "verification": "TEXT",
+            "signal_source": "TEXT",
+            "buy_range": "TEXT",
+            "target_price": "TEXT",
+            "stop_loss": "TEXT",
+            "strength": "TEXT",
+        })
+
         # 创建索引
         cur.execute("CREATE INDEX IF NOT EXISTS idx_telegraph_ts ON cls_telegraph(timestamp)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_telegraph_red ON cls_telegraph(is_red, timestamp)")
@@ -222,10 +330,25 @@ class DB:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_vip_stock_code ON vip_discovered_stock(stock_code)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_gold_stock_date ON gold_stock(recommend_date)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sector_mf_date ON sector_moneyflow(trade_date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_insight_date ON market_insight(date, period)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_report_date ON report(date, period)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_qsq_date ON qian_sanqiang_result(date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_heat_date ON heat_tracking(date, sector)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_calendar_date ON calendar_event(event_date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_date ON website_snapshot(date, period)")
 
         conn.commit()
         conn.close()
-        print(f"[DB] 初始化完成: {self.db_path}")
+        print(f"[DB] 初始化完成: {self.db_path} (v4.0, 19表)")
+
+    def _alter_add_columns(self, cur, table: str, columns: dict):
+        """幂等地为表添加列（已存在的列跳过）"""
+        cur.execute(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in cur.fetchall()}
+        for col, coltype in columns.items():
+            if col not in existing:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+                print(f"[DB] ALTER {table} ADD {col} {coltype}")
 
     # ------------------------------------------------------------------
     # 通用缓存: get_or_fetch
@@ -559,119 +682,227 @@ class DB:
             result.append(item)
         return result
 
+    def query_vip_discovered_stocks(self, date: str = None, limit: int = 100) -> List[dict]:
+        """查询VIP文章发现的股票（按 stock_code 聚合）"""
+        conn = self._conn()
+        sql = ("SELECT stock_code, stock_name, industry, COUNT(*) as cnt "
+               "FROM vip_discovered_stock ")
+        params = []
+        if date:
+            sql += ("WHERE article_id IN (SELECT article_id FROM cls_vip_article "
+                    "WHERE date(fetch_time)=?) ")
+            params.append(date)
+        sql += "GROUP BY stock_code ORDER BY cnt DESC LIMIT ?"
+        params.append(limit)
+        cur = conn.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
     # ------------------------------------------------------------------
-    # 指数行情
+    # 指数行情（dict 签名）
     # ------------------------------------------------------------------
 
-    def upsert_index_quote(self, name, code, trade_date, source, close,
-                           pct_chg=None, pre_close=None, amount=None,
-                           is_realtime=0):
+    def upsert_index_quote(self, item: dict) -> bool:
+        """写入指数行情。item: {name, code, trade_date, source, close, pct_chg,
+        pre_close, amount, is_realtime}"""
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn = self._conn()
         conn.execute(
             "INSERT OR REPLACE INTO index_quote "
             "(name, code, trade_date, fetch_time, source, close, pct_chg, pre_close, amount, is_realtime) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (name, code, trade_date, now_str, source, close, pct_chg, pre_close, amount, is_realtime)
+            (item.get("name", ""), item.get("code", ""), item.get("trade_date", ""),
+             now_str, item.get("source", ""), item.get("close"), item.get("pct_chg"),
+             item.get("pre_close"), item.get("amount"), int(item.get("is_realtime", 0)))
         )
         conn.commit()
         conn.close()
+        return True
 
-    def query_index_quote(self, name, trade_date, source=None):
+    def query_index_quote(self, date: str = None, realtime_only: bool = False) -> List[dict]:
+        """查询指数行情（按日期，默认取每只指数最新一条）"""
+        if date is None:
+            date = datetime.datetime.now().strftime("%Y-%m-%d")
         conn = self._conn()
-        sql = "SELECT * FROM index_quote WHERE name=? AND trade_date=?"
-        params = [name, trade_date]
-        if source:
-            sql += " AND source=?"
-            params.append(source)
-        sql += " ORDER BY fetch_time DESC LIMIT 1"
+        sql = ("SELECT i.* FROM index_quote i "
+               "INNER JOIN (SELECT name, MAX(fetch_time) ft FROM index_quote "
+               "WHERE trade_date=? GROUP BY name) t ON i.name=t.name AND i.fetch_time=t.ft "
+               "WHERE i.trade_date=?")
+        params = [date, date]
+        if realtime_only:
+            sql += " AND i.is_realtime=1"
         cur = conn.execute(sql, params)
-        row = cur.fetchone()
+        rows = [dict(r) for r in cur.fetchall()]
         conn.close()
-        return dict(row) if row else None
+        return rows
 
     # ------------------------------------------------------------------
-    # 板块资金 / 涨停 / 龙虎榜 / 北向 / 融资融券
+    # 板块资金 / 涨停 / 龙虎榜 / 北向 / 融资融券（list 批量签名）
     # ------------------------------------------------------------------
 
-    def upsert_sector_moneyflow(self, trade_date, industry, net_mf_amount):
+    def upsert_sector_moneyflow(self, items: list) -> int:
+        """items: [{trade_date, industry, net_mf_amount}, ...]"""
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn = self._conn()
-        conn.execute(
-            "INSERT OR REPLACE INTO sector_moneyflow "
-            "(trade_date, industry, net_mf_amount, fetch_time) VALUES (?, ?, ?, ?)",
-            (trade_date, industry, net_mf_amount, now_str)
-        )
+        n = 0
+        for it in items:
+            conn.execute(
+                "INSERT OR REPLACE INTO sector_moneyflow "
+                "(trade_date, industry, net_mf_amount, fetch_time) VALUES (?, ?, ?, ?)",
+                (it.get("trade_date", ""), it.get("industry", ""), it.get("net_mf_amount"), now_str)
+            )
+            n += 1
         conn.commit()
         conn.close()
+        return n
 
-    def upsert_limit_up(self, trade_date, ts_code, name=None, pct_chg=None,
-                        industry=None, amount=None):
+    def query_sector_moneyflow(self, date: str = None, top_n: int = 20) -> List[dict]:
+        if date is None:
+            date = datetime.datetime.now().strftime("%Y-%m-%d")
+        conn = self._conn()
+        cur = conn.execute(
+            "SELECT * FROM sector_moneyflow WHERE trade_date=? ORDER BY net_mf_amount DESC LIMIT ?",
+            (date, top_n)
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
+    def upsert_limit_up(self, items: list) -> int:
+        """items: [{trade_date, ts_code, name, pct_chg, industry, amount}, ...]"""
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn = self._conn()
-        conn.execute(
-            "INSERT OR REPLACE INTO limit_up "
-            "(trade_date, ts_code, name, pct_chg, industry, amount, fetch_time) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (trade_date, ts_code, name, pct_chg, industry, amount, now_str)
-        )
+        n = 0
+        for it in items:
+            conn.execute(
+                "INSERT OR REPLACE INTO limit_up "
+                "(trade_date, ts_code, name, pct_chg, industry, amount, fetch_time) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (it.get("trade_date", ""), it.get("ts_code", ""), it.get("name", ""),
+                 it.get("pct_chg"), it.get("industry", ""), it.get("amount"), now_str)
+            )
+            n += 1
         conn.commit()
         conn.close()
+        return n
 
-    def upsert_dragon_tiger(self, trade_date, ts_code, name=None,
-                            net_buy=None, reason=None):
+    def query_limit_up(self, date: str = None) -> List[dict]:
+        if date is None:
+            date = datetime.datetime.now().strftime("%Y-%m-%d")
+        conn = self._conn()
+        cur = conn.execute(
+            "SELECT * FROM limit_up WHERE trade_date=? ORDER BY pct_chg DESC", (date,)
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
+    def upsert_dragon_tiger(self, items: list) -> int:
+        """items: [{trade_date, ts_code, name, net_buy, reason}, ...]"""
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn = self._conn()
-        conn.execute(
-            "INSERT OR REPLACE INTO dragon_tiger "
-            "(trade_date, ts_code, name, net_buy, reason, fetch_time) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (trade_date, ts_code, name, net_buy, reason, now_str)
-        )
+        n = 0
+        for it in items:
+            conn.execute(
+                "INSERT OR REPLACE INTO dragon_tiger "
+                "(trade_date, ts_code, name, net_buy, reason, fetch_time) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (it.get("trade_date", ""), it.get("ts_code", ""), it.get("name", ""),
+                 it.get("net_buy"), it.get("reason", ""), now_str)
+            )
+            n += 1
         conn.commit()
         conn.close()
+        return n
 
-    def upsert_north_money(self, trade_date, north_money, hgt=None,
-                           sgt=None, south_money=None):
+    def query_dragon_tiger(self, date: str = None) -> List[dict]:
+        if date is None:
+            date = datetime.datetime.now().strftime("%Y-%m-%d")
+        conn = self._conn()
+        cur = conn.execute(
+            "SELECT * FROM dragon_tiger WHERE trade_date=? ORDER BY net_buy DESC", (date,)
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
+    def upsert_north_money(self, item: dict) -> bool:
+        """item: {trade_date, north_money, hgt, sgt, south_money}"""
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn = self._conn()
         conn.execute(
             "INSERT OR REPLACE INTO north_money "
             "(trade_date, north_money, hgt, sgt, south_money, fetch_time) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (trade_date, north_money, hgt, sgt, south_money, now_str)
+            (item.get("trade_date", ""), item.get("north_money"), item.get("hgt"),
+             item.get("sgt"), item.get("south_money"), now_str)
         )
         conn.commit()
         conn.close()
+        return True
 
-    def upsert_margin(self, trade_date, exchange_id, rzye=None,
-                      rzche=None, rqye=None):
+    def query_north_money(self, date: str = None) -> dict:
+        if date is None:
+            date = datetime.datetime.now().strftime("%Y-%m-%d")
+        conn = self._conn()
+        cur = conn.execute("SELECT * FROM north_money WHERE trade_date=?", (date,))
+        row = cur.fetchone()
+        conn.close()
+        return dict(row) if row else {}
+
+    def upsert_margin(self, items: list) -> int:
+        """items: [{trade_date, exchange_id, rzye, rzche, rqye}, ...]"""
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn = self._conn()
-        conn.execute(
-            "INSERT OR REPLACE INTO margin "
-            "(trade_date, exchange_id, rzye, rzche, rqye, fetch_time) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (trade_date, exchange_id, rzye, rzche, rqye, now_str)
-        )
+        n = 0
+        for it in items:
+            conn.execute(
+                "INSERT OR REPLACE INTO margin "
+                "(trade_date, exchange_id, rzye, rzche, rqye, fetch_time) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (it.get("trade_date", ""), it.get("exchange_id", ""), it.get("rzye"),
+                 it.get("rzche"), it.get("rqye"), now_str)
+            )
+            n += 1
         conn.commit()
         conn.close()
+        return n
+
+    def query_margin(self, date: str = None) -> List[dict]:
+        if date is None:
+            date = datetime.datetime.now().strftime("%Y-%m-%d")
+        conn = self._conn()
+        cur = conn.execute("SELECT * FROM margin WHERE trade_date=?", (date,))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
 
     # ------------------------------------------------------------------
-    # 金股
+    # 金股（dict 签名 + v4 扩展字段）
     # ------------------------------------------------------------------
 
-    def upsert_gold_stock(self, name, code, recommend_date, report_type="",
-                          reason="", score=0, price_at_recommend=None):
+    def upsert_gold_stock(self, item: dict) -> bool:
+        """写入金股推荐。item 含基础字段+扩展字段(catalyst/dragon_vein/verification/
+        signal_source/buy_range/target_price/stop_loss/strength)"""
         conn = self._conn()
         conn.execute(
-            "INSERT OR IGNORE INTO gold_stock "
-            "(name, code, recommend_date, report_type, reason, score, price_at_recommend) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, code, recommend_date, report_type, reason, score, price_at_recommend)
+            "INSERT OR REPLACE INTO gold_stock "
+            "(name, code, recommend_date, report_type, reason, score, price_at_recommend, "
+            " catalyst, dragon_vein, verification, signal_source, buy_range, "
+            " target_price, stop_loss, strength) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (item.get("name", ""), item.get("code", ""), item.get("recommend_date", ""),
+             item.get("report_type", ""), item.get("reason", ""), item.get("score", 0),
+             item.get("price_at_recommend"), item.get("catalyst", ""),
+             item.get("dragon_vein", ""), item.get("verification", ""),
+             item.get("signal_source", ""), item.get("buy_range", ""),
+             item.get("target_price", ""), item.get("stop_loss", ""),
+             item.get("strength", "关注"))
         )
         conn.commit()
         conn.close()
+        return True
 
     def update_gold_stock_backtest(self, code, recommend_date, current_price,
                                     return_1d=None, return_3d=None, return_5d=None,
@@ -689,15 +920,287 @@ class DB:
         conn.commit()
         conn.close()
 
+    def query_gold_stock(self, date: str = None, limit: int = 100) -> List[dict]:
+        """查询金股（按推荐日期，默认最新）"""
+        conn = self._conn()
+        if date:
+            cur = conn.execute(
+                "SELECT * FROM gold_stock WHERE recommend_date=? ORDER BY score DESC LIMIT ?",
+                (date, limit)
+            )
+        else:
+            cur = conn.execute(
+                "SELECT * FROM gold_stock ORDER BY recommend_date DESC, score DESC LIMIT ?",
+                (limit,)
+            )
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
+    # 旧别名（向后兼容）
     def query_gold_stocks(self, limit=100) -> List[dict]:
+        return self.query_gold_stock(limit=limit)
+
+    # ------------------------------------------------------------------
+    # 钱三强选股结果
+    # ------------------------------------------------------------------
+
+    def upsert_qian_sanqiang(self, items: list) -> int:
+        """items: [{date, stock_code, stock_name, strategy, score, detail_json}, ...]"""
+        conn = self._conn()
+        n = 0
+        for it in items:
+            conn.execute(
+                "INSERT INTO qian_sanqiang_result "
+                "(date, stock_code, stock_name, strategy, score, detail_json) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (it.get("date", ""), it.get("stock_code", ""), it.get("stock_name", ""),
+                 it.get("strategy", ""), it.get("score", 0),
+                 it.get("detail_json", ""))
+            )
+            n += 1
+        conn.commit()
+        conn.close()
+        return n
+
+    def query_qian_sanqiang(self, date: str = None, limit: int = 50) -> List[dict]:
+        if date is None:
+            date = datetime.datetime.now().strftime("%Y-%m-%d")
         conn = self._conn()
         cur = conn.execute(
-            "SELECT * FROM gold_stock ORDER BY recommend_date DESC, score DESC LIMIT ?",
-            (limit,)
+            "SELECT * FROM qian_sanqiang_result WHERE date=? ORDER BY score DESC LIMIT ?",
+            (date, limit)
         )
-        rows = cur.fetchall()
+        rows = [dict(r) for r in cur.fetchall()]
         conn.close()
-        return [dict(r) for r in rows]
+        return rows
+
+    # ------------------------------------------------------------------
+    # 市场洞见
+    # ------------------------------------------------------------------
+
+    def upsert_insight(self, item: dict) -> bool:
+        """item: {date, period, category, signal_text, a_share_impact, confidence, signal_time}"""
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO market_insight "
+            "(date, period, category, signal_text, a_share_impact, confidence, signal_time) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (item.get("date", ""), item.get("period", ""), item.get("category", ""),
+             item.get("signal_text", ""), item.get("a_share_impact", ""),
+             item.get("confidence", "medium"), item.get("signal_time", ""))
+        )
+        conn.commit()
+        conn.close()
+        return True
+
+    def query_insights(self, date: str = None, period: str = None) -> List[dict]:
+        if date is None:
+            date = datetime.datetime.now().strftime("%Y-%m-%d")
+        conn = self._conn()
+        sql = "SELECT * FROM market_insight WHERE date=?"
+        params = [date]
+        if period:
+            sql += " AND period=?"
+            params.append(period)
+        sql += " ORDER BY id"
+        cur = conn.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
+    # ------------------------------------------------------------------
+    # 报告记录
+    # ------------------------------------------------------------------
+
+    def upsert_report(self, item: dict) -> int:
+        """item: {date, period, title, content, char_count, quality_score}"""
+        conn = self._conn()
+        cur = conn.execute(
+            "INSERT INTO report (date, period, title, content, char_count, quality_score) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (item.get("date", ""), item.get("period", ""), item.get("title", ""),
+             item.get("content", ""), item.get("char_count", 0), item.get("quality_score", 0))
+        )
+        rid = cur.lastrowid
+        conn.commit()
+        conn.close()
+        return rid
+
+    def query_latest_report(self, period: str = None) -> dict:
+        conn = self._conn()
+        sql = "SELECT * FROM report"
+        params = []
+        if period:
+            sql += " WHERE period=?"
+            params.append(period)
+        sql += " ORDER BY id DESC LIMIT 1"
+        cur = conn.execute(sql, params)
+        row = cur.fetchone()
+        conn.close()
+        return dict(row) if row else {}
+
+    def query_reports(self, date: str = None, limit: int = 50) -> List[dict]:
+        conn = self._conn()
+        if date:
+            cur = conn.execute(
+                "SELECT id, date, period, title, char_count, quality_score, created_at "
+                "FROM report WHERE date=? ORDER BY id DESC LIMIT ?", (date, limit))
+        else:
+            cur = conn.execute(
+                "SELECT id, date, period, title, char_count, quality_score, created_at "
+                "FROM report ORDER BY id DESC LIMIT ?", (limit,))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
+    # ------------------------------------------------------------------
+    # 热度追踪
+    # ------------------------------------------------------------------
+
+    def upsert_heat_tracking(self, items: list) -> int:
+        """items: [{date, sector, heat_score, capital_flow, limit_up_count, lifecycle}, ...]"""
+        conn = self._conn()
+        n = 0
+        for it in items:
+            conn.execute(
+                "INSERT INTO heat_tracking "
+                "(date, sector, heat_score, capital_flow, limit_up_count, lifecycle) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (it.get("date", ""), it.get("sector", ""), it.get("heat_score", 0),
+                 it.get("capital_flow"), it.get("limit_up_count", 0), it.get("lifecycle", ""))
+            )
+            n += 1
+        conn.commit()
+        conn.close()
+        return n
+
+    def query_heat_tracking(self, date: str = None, sector: str = None,
+                            days: int = 0) -> List[dict]:
+        conn = self._conn()
+        if days > 0:
+            end = date or datetime.datetime.now().strftime("%Y-%m-%d")
+            start = (datetime.datetime.strptime(end, "%Y-%m-%d")
+                     - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            sql = "SELECT * FROM heat_tracking WHERE date>=? AND date<=?"
+            params = [start, end]
+            if sector:
+                sql += " AND sector=?"
+                params.append(sector)
+            sql += " ORDER BY date, sector"
+            cur = conn.execute(sql, params)
+        else:
+            if date is None:
+                date = datetime.datetime.now().strftime("%Y-%m-%d")
+            sql = "SELECT * FROM heat_tracking WHERE date=?"
+            params = [date]
+            if sector:
+                sql += " AND sector=?"
+                params.append(sector)
+            sql += " ORDER BY heat_score DESC"
+            cur = conn.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
+    # ------------------------------------------------------------------
+    # 学习记录
+    # ------------------------------------------------------------------
+
+    def upsert_learning_record(self, item: dict) -> bool:
+        """item: {date, prediction, actual, gap_analysis, lesson, category}"""
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO learning_record "
+            "(date, prediction, actual, gap_analysis, lesson, category) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (item.get("date", ""), item.get("prediction", ""), item.get("actual", ""),
+             item.get("gap_analysis", ""), item.get("lesson", ""), item.get("category", ""))
+        )
+        conn.commit()
+        conn.close()
+        return True
+
+    def query_learning_records(self, limit: int = 30) -> List[dict]:
+        conn = self._conn()
+        cur = conn.execute(
+            "SELECT * FROM learning_record ORDER BY id DESC LIMIT ?", (limit,))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
+    # ------------------------------------------------------------------
+    # 网站数据快照
+    # ------------------------------------------------------------------
+
+    def upsert_website_snapshot(self, snapshot_json: str, date: str, period: str = None) -> bool:
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO website_snapshot (date, period, snapshot_json) VALUES (?, ?, ?)",
+            (date, period, snapshot_json)
+        )
+        conn.commit()
+        conn.close()
+        return True
+
+    def query_website_snapshot(self, date: str = None, period: str = None) -> dict:
+        conn = self._conn()
+        sql = "SELECT * FROM website_snapshot"
+        params = []
+        clauses = []
+        if date:
+            clauses.append("date=?")
+            params.append(date)
+        if period:
+            clauses.append("period=?")
+            params.append(period)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY id DESC LIMIT 1"
+        cur = conn.execute(sql, params)
+        row = cur.fetchone()
+        conn.close()
+        return dict(row) if row else {}
+
+    # ------------------------------------------------------------------
+    # 财经日历事件
+    # ------------------------------------------------------------------
+
+    def upsert_calendar_event(self, items: list) -> int:
+        """items: [{event_date, event_time, title, importance, category, detail}, ...]"""
+        conn = self._conn()
+        n = 0
+        for it in items:
+            conn.execute(
+                "INSERT INTO calendar_event "
+                "(event_date, event_time, title, importance, category, detail) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (it.get("event_date", ""), it.get("event_time", ""), it.get("title", ""),
+                 it.get("importance", "medium"), it.get("category", ""), it.get("detail", ""))
+            )
+            n += 1
+        conn.commit()
+        conn.close()
+        return n
+
+    def query_calendar_events(self, start_date: str = None, end_date: str = None) -> List[dict]:
+        conn = self._conn()
+        sql = "SELECT * FROM calendar_event"
+        params = []
+        clauses = []
+        if start_date:
+            clauses.append("event_date>=?")
+            params.append(start_date)
+        if end_date:
+            clauses.append("event_date<=?")
+            params.append(end_date)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY event_date, event_time"
+        cur = conn.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
 
     # ------------------------------------------------------------------
     # 共振分析 — 跨数据源交叉匹配
@@ -813,7 +1316,9 @@ class DB:
         tables = [
             "raw_cache", "index_quote", "sector_moneyflow", "limit_up",
             "dragon_tiger", "north_money", "margin", "cls_telegraph",
-            "cls_telegraph_stock", "cls_vip_article", "vip_discovered_stock", "gold_stock"
+            "cls_telegraph_stock", "cls_vip_article", "vip_discovered_stock", "gold_stock",
+            "market_insight", "report", "qian_sanqiang_result", "heat_tracking",
+            "learning_record", "website_snapshot", "calendar_event"
         ]
         for table in tables:
             cur = conn.execute(f"SELECT COUNT(*) as cnt FROM {table}")

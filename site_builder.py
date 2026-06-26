@@ -317,16 +317,95 @@ def _derive_gold_score(prob_text, strength_text, dragon_text):
     return max(50, min(95, base))
 
 
+def load_v4_gold_stocks(date_str):
+    """从 data/gold_stocks.json 读取 v4.0 多维共振金股（扁平格式）。
+
+    v4 gold_stocks.json 结构:
+        {"date": "YYYY-MM-DD",
+         "gold_stocks": [{code, name, dimensions, score, resonance,
+                          dragon_net_buy, dragon_reason, vip_count, cls_titles, ...}],
+         "total_candidates": int}
+
+    转换为前端兼容结构（与 extract_gold_stocks 返回一致，并补充 v4 扩展字段：
+    dimensions / resonance / catalyst / dragon_vein）。
+    日期不匹配或文件缺失时返回空列表，由调用方回退到报告 Markdown 解析。
+    """
+    gold_path = DATA_DIR / "gold_stocks.json"
+    data = load_json(gold_path)
+    if not data:
+        return []
+
+    # 日期校验：仅当文件日期与目标日期一致时采用
+    file_date = data.get("date", "")
+    if file_date and date_str and file_date != date_str:
+        print(f"[提示] gold_stocks.json 日期({file_date})与目标日期({date_str})不一致，回退到报告解析")
+        return []
+
+    gold_list = data.get("gold_stocks", [])
+    if not isinstance(gold_list, list):
+        return []
+
+    result = []
+    for g in gold_list:
+        if not isinstance(g, dict):
+            continue
+        code = g.get("code", "")
+        name = g.get("name", "")
+        dimensions = g.get("dimensions", []) or []
+        score = g.get("score", 0)
+        resonance = g.get("resonance", len(dimensions))
+        dragon_reason = g.get("dragon_reason", "") or g.get("dragon_vein", "")
+        catalyst = g.get("catalyst", "")
+        if not catalyst and g.get("cls_titles"):
+            catalyst = "; ".join(g.get("cls_titles", []))[:200]
+
+        # 构建 reason：共振维度 + 龙虎榜原因/催化剂
+        reason_parts = []
+        if dimensions:
+            reason_parts.append("、".join(dimensions) + f"({resonance}/5)")
+        if dragon_reason:
+            reason_parts.append(dragon_reason)
+        elif catalyst:
+            reason_parts.append(catalyst)
+        reason = " | ".join(reason_parts) if reason_parts else "多维共振"
+        if len(reason) > 100:
+            reason = reason[:97] + "..."
+
+        result.append({
+            "name": name,
+            "code": code,
+            "reason": reason,
+            "score": score,
+            "dragon": dragon_reason,      # 龙虎榜/龙脉定位
+            "strategy": g.get("strategy", ""),
+            "time": g.get("time", g.get("time_horizon", "")),
+            # v4 扩展字段
+            "dimensions": dimensions,
+            "resonance": resonance,
+            "catalyst": catalyst,
+            "dragon_vein": dragon_reason,
+        })
+
+    if result:
+        print(f"[金股] 从 gold_stocks.json 读取 v4 金股 {len(result)} 只")
+    return result
+
+
 # ---------------------------------------------------------------------------
 # 市场数据提取
 # ---------------------------------------------------------------------------
 
 def extract_market_snapshot(data_summary):
-    """从 data_summary.json 中提取市场指数、涨跌停、成交额、北向资金
+    """从 data_summary.json 中提取市场指数、涨跌停、成交额、北向资金、板块与全球市场
+
+    兼容 v4.0 扁平格式（顶层 indices / sectors_top / north_money / limit_up /
+    dragon_tiger / insights）与 v3.x chapter 格式（chapter1.index_summary /
+    chapter2.north_money / chapter4.limit_stats）。v4 优先，v3 兜底，保持向后兼容。
 
     返回:
         dict: {"indices": [...], "limit_up": int, "limit_down": int,
-               "volume": str, "north_flow": str}
+               "volume": str, "north_flow": str,
+               "sectors_top": [...], "global_markets": [...]}
     """
     snapshot = {
         "indices": [],
@@ -334,22 +413,32 @@ def extract_market_snapshot(data_summary):
         "limit_down": 0,
         "volume": "",
         "north_flow": "",
+        "sectors_top": [],
+        "global_markets": [],
     }
 
     if not data_summary:
         print("[警告] data_summary 为空，市场数据提取失败")
         return snapshot
 
-    # 提取指数数据（chapter1.index_summary）
-    chapter1 = data_summary.get("chapter1", {})
-    index_summary = chapter1.get("index_summary", [])
-    total_amount_yi = 0.0  # 成交额合计（亿元）
+    # ------------------------------------------------------------------
+    # 1) 指数数据：v4 顶层 indices 扁平列表 优先；v3 chapter1.index_summary 兜底
+    # ------------------------------------------------------------------
+    v4_indices = data_summary.get("indices")
+    if isinstance(v4_indices, list) and v4_indices:
+        index_list = v4_indices
+    else:
+        chapter1 = data_summary.get("chapter1", {})
+        index_list = chapter1.get("index_summary", []) if isinstance(chapter1, dict) else []
 
-    for idx in index_summary:
+    total_amount_yi = 0.0  # 两市成交额合计（亿元）
+    for idx in index_list:
+        if not isinstance(idx, dict):
+            continue
         name = idx.get("name", "")
         close = idx.get("close")
         pct_chg = idx.get("pct_chg")
-        amount = idx.get("amount", 0)  # 单位：千元
+        amount = idx.get("amount", 0)
 
         snapshot["indices"].append({
             "name": name,
@@ -359,34 +448,167 @@ def extract_market_snapshot(data_summary):
 
         # 上证指数 + 深证成指 的成交额合计为两市总成交额
         if name in ("上证指数", "深证成指") and amount:
-            # 千元 -> 亿元
-            total_amount_yi += amount / 100000.0
+            try:
+                amt = float(amount)
+            except (TypeError, ValueError):
+                continue
+            # 成交额单位因数据源而异：
+            #   - sina_realtime（盘中实时）: 元  -> /1e8 得到亿
+            #   - tushare_close / tushare（收盘）: 千元 -> /1e5 得到亿
+            src = str(idx.get("source", "") or "")
+            if "sina" in src or "realtime" in src:
+                total_amount_yi += amt / 1e8
+            else:
+                total_amount_yi += amt / 1e5
 
     if total_amount_yi > 0:
         snapshot["volume"] = f"{total_amount_yi:.0f}亿"
 
-    # 提取涨跌停数据（chapter4.limit_stats）
-    chapter4 = data_summary.get("chapter4", {})
-    limit_stats = chapter4.get("limit_stats", {})
-    snapshot["limit_up"] = limit_stats.get("limit_up_count", 0)
-    snapshot["limit_down"] = limit_stats.get("limit_down_count", 0)
+    # ------------------------------------------------------------------
+    # 2) 涨跌停：v4 顶层 limit_up 列表（len=涨停家数）优先；v3 chapter4.limit_stats 兜底
+    # ------------------------------------------------------------------
+    v4_limit_up = data_summary.get("limit_up")
+    if isinstance(v4_limit_up, list):
+        snapshot["limit_up"] = len(v4_limit_up)
+        # v4 暂无独立跌停列表；若 stats 提供更明确的涨停数则采用 stats
+        stats = data_summary.get("stats", {})
+        if isinstance(stats, dict):
+            lu_in_stats = stats.get("limit_up_count")
+            if isinstance(lu_in_stats, int) and lu_in_stats > snapshot["limit_up"]:
+                snapshot["limit_up"] = lu_in_stats
+    else:
+        chapter4 = data_summary.get("chapter4", {})
+        if isinstance(chapter4, dict):
+            limit_stats = chapter4.get("limit_stats", {})
+            if isinstance(limit_stats, dict):
+                snapshot["limit_up"] = limit_stats.get("limit_up_count", 0)
+                snapshot["limit_down"] = limit_stats.get("limit_down_count", 0)
 
-    # 提取北向资金（chapter2.north_money）
-    chapter2 = data_summary.get("chapter2", {})
-    north_money = chapter2.get("north_money", {})
-    north_val = north_money.get("north_money")
-    if north_val:
+    # ------------------------------------------------------------------
+    # 3) 北向资金：v4 顶层 north_money（已是亿元）优先；v3 chapter2.north_money（万元）兜底
+    # ------------------------------------------------------------------
+    v4_nm = data_summary.get("north_money")
+    north_val = None
+    north_unit_yi = True  # v4 north_money 字段已为亿元，无需换算
+    if isinstance(v4_nm, dict) and v4_nm.get("north_money") is not None:
+        north_val = v4_nm.get("north_money")
+    else:
+        chapter2 = data_summary.get("chapter2", {})
+        if isinstance(chapter2, dict):
+            nm_v3 = chapter2.get("north_money", {})
+            if isinstance(nm_v3, dict) and nm_v3.get("north_money") is not None:
+                north_val = nm_v3.get("north_money")
+                north_unit_yi = False  # v3 单位为万元
+
+    if north_val is not None:
         try:
-            # 单位：万元 -> 亿元
-            north_yi = float(north_val) / 10000.0
-            if north_yi >= 0:
-                snapshot["north_flow"] = f"净流入{north_yi:.2f}亿"
+            north_num = float(north_val)
+            if not north_unit_yi:
+                north_num = north_num / 10000.0  # 万元 -> 亿元
+            if north_num >= 0:
+                snapshot["north_flow"] = f"净流入{north_num:.2f}亿"
             else:
-                snapshot["north_flow"] = f"净流出{abs(north_yi):.2f}亿"
+                snapshot["north_flow"] = f"净流出{abs(north_num):.2f}亿"
         except (ValueError, TypeError):
-            snapshot["north_flow"] = f"{north_val}万元"
+            snapshot["north_flow"] = f"{north_val}"
+
+    # ------------------------------------------------------------------
+    # 4) 板块资金（v4 新增）：v4 顶层 sectors_top（net_mf_amount 已为亿元）
+    # ------------------------------------------------------------------
+    v4_sectors = data_summary.get("sectors_top")
+    if isinstance(v4_sectors, list):
+        for sec in v4_sectors:
+            if not isinstance(sec, dict):
+                continue
+            industry = sec.get("industry", "")
+            net_mf = sec.get("net_mf_amount")
+            try:
+                net_mf_num = float(net_mf) if net_mf is not None else None
+            except (TypeError, ValueError):
+                net_mf_num = None
+            snapshot["sectors_top"].append({
+                "name": industry,
+                "net_flow": round(net_mf_num, 2) if net_mf_num is not None else None,
+            })
+
+    # ------------------------------------------------------------------
+    # 5) 全球市场（v4 新增）：优先 data_summary["global"]，其次解析 insights 海外市场
+    # ------------------------------------------------------------------
+    snapshot["global_markets"] = _extract_global_markets(data_summary)
 
     return snapshot
+
+
+def _extract_global_markets(data_summary):
+    """提取全球市场（美股/港股/外汇/商品）行情，供前端展示。
+
+    优先级：
+      1. data_summary["global"]（v4 若直接提供结构化全球行情 dict）
+      2. data_summary["insights"] 中 category == "海外市场" 的信号（解析 signal_text）
+
+    返回:
+        list[dict]: [{"name": str, "value": str, "change": str}]
+    """
+    if not isinstance(data_summary, dict):
+        return []
+
+    # 1) 结构化 global 字段（{名称: {price/value, chg_pct}}）
+    g = data_summary.get("global")
+    if isinstance(g, dict) and g:
+        result = []
+        for name, item in g.items():
+            if not isinstance(item, dict):
+                continue
+            price = item.get("price")
+            if price is None:
+                price = item.get("value")
+            chg_pct = item.get("chg_pct")
+            if chg_pct is None:
+                chg_pct = item.get("change_pct")
+            result.append({
+                "name": str(name),
+                "value": format_index_value(price) if isinstance(price, (int, float)) else ("" if price is None else str(price)),
+                "change": format_change(chg_pct) if isinstance(chg_pct, (int, float)) else "",
+            })
+        if result:
+            return result
+
+    # 2) 从 insights 海外市场信号解析
+    insights = data_summary.get("insights")
+    if not isinstance(insights, list):
+        return []
+
+    result = []
+    for ins in insights:
+        if not isinstance(ins, dict):
+            continue
+        if ins.get("category") != "海外市场":
+            continue
+        text = ins.get("signal_text", "") or ""
+        # 例: "道琼斯 上涨 0.65%（+299.97点），报46247.29"
+        #     "恒生指数 下跌 1.76%（-405.05点），报22671.86"
+        #     "美元指数 下跌 0.13%（-0.13点），报101.33"
+        m = re.match(
+            r"\s*(.+?)\s+(上涨|下跌|涨|跌)\s*([+\-]?[\d.]+)%.*?报\s*([\d.]+)",
+            text,
+        )
+        if not m:
+            continue
+        name = m.group(1).strip()
+        direction = m.group(2)
+        try:
+            pct = float(m.group(3))
+        except ValueError:
+            continue
+        if "跌" in direction and pct > 0:
+            pct = -pct
+        price = m.group(4)
+        result.append({
+            "name": name,
+            "value": price,
+            "change": format_change(pct),
+        })
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -523,7 +745,10 @@ def build_archive_json(date, report_type, data_summary, heat_data,
     title = TITLE_MAP.get(report_type, f"多维市场研报（{report_type}）")
     summary = extract_summary(report_md)
     chapters = parse_report_markdown(report_md)
-    gold_stocks = extract_gold_stocks(report_md)
+    # v4 gold_stocks.json 优先；缺失/日期不匹配时回退到报告 Markdown 解析（v3 金股N 格式）
+    gold_stocks = load_v4_gold_stocks(date)
+    if not gold_stocks:
+        gold_stocks = extract_gold_stocks(report_md)
     market = extract_market_snapshot(data_summary)
 
     # 热度数据
@@ -977,7 +1202,10 @@ def main():
     # 7. 解析报告并构建归档 JSON
     print("\n--- 步骤 7/8: 构建归档数据 ---")
     summary_text = extract_summary(report_md)
-    gold_stocks = extract_gold_stocks(report_md)
+    # v4 gold_stocks.json 优先；缺失/日期不匹配时回退到报告 Markdown 解析（v3 金股N 格式）
+    gold_stocks = load_v4_gold_stocks(date_str)
+    if not gold_stocks:
+        gold_stocks = extract_gold_stocks(report_md)
     chapters = parse_report_markdown(report_md)
     market = extract_market_snapshot(data_summary)
 
