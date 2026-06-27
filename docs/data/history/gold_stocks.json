@@ -174,13 +174,13 @@
       ],
       "backtest": {
         "price_at_recommend": 18.32,
-        "current_price": 18.32,
-        "return_1d": null,
+        "current_price": 19.36,
+        "return_1d": 5.68,
         "return_3d": null,
         "return_5d": null,
         "return_10d": null,
         "return_20d": null,
-        "max_return": 0.0,
+        "max_return": 5.68,
         "max_drawdown": 0.0
       }
     },
@@ -198,14 +198,14 @@
       ],
       "backtest": {
         "price_at_recommend": 13.55,
-        "current_price": 13.55,
-        "return_1d": null,
+        "current_price": 12.4,
+        "return_1d": -8.49,
         "return_3d": null,
         "return_5d": null,
         "return_10d": null,
         "return_20d": null,
         "max_return": 0.0,
-        "max_drawdown": 0.0
+        "max_drawdown": -8.49
       }
     },
     {
@@ -222,13 +222,13 @@
       ],
       "backtest": {
         "price_at_recommend": 5.34,
-        "current_price": 5.34,
-        "return_1d": null,
+        "current_price": 5.4,
+        "return_1d": 1.12,
         "return_3d": null,
         "return_5d": null,
         "return_10d": null,
         "return_20d": null,
-        "max_return": 0.0,
+        "max_return": 1.12,
         "max_drawdown": 0.0
       }
     },
@@ -246,14 +246,14 @@
       ],
       "backtest": {
         "price_at_recommend": 59.18,
-        "current_price": 59.18,
-        "return_1d": null,
+        "current_price": 54.38,
+        "return_1d": -8.11,
         "return_3d": null,
         "return_5d": null,
         "return_10d": null,
         "return_20d": null,
         "max_return": 0.0,
-        "max_drawdown": 0.0
+        "max_drawdown": -8.11
       }
     },
     {
@@ -270,14 +270,14 @@
       ],
       "backtest": {
         "price_at_recommend": 288.29,
-        "current_price": 288.29,
-        "return_1d": null,
+        "current_price": 283.24,
+        "return_1d": -1.75,
         "return_3d": null,
         "return_5d": null,
         "return_10d": null,
         "return_20d": null,
         "max_return": 0.0,
-        "max_drawdown": 0.0
+        "max_drawdown": -1.75
       }
     },
     {
@@ -294,16 +294,172 @@
       ],
       "backtest": {
         "price_at_recommend": 10.15,
-        "current_price": 10.15,
-        "return_1d": null,
+        "current_price": 9.76,
+        "return_1d": -3.84,
         "return_3d": null,
         "return_5d": null,
         "return_10d": null,
         "return_20d": null,
         "max_return": 0.0,
-        "max_drawdown": 0.0
+        "max_drawdown": -3.84
+      }
+    },
+    {
+      "name": "广合科技",
+      "code": "001389",
+      "first_recommended": "2026-06-26",
+      "recommendations": [
+        {
+          "date": "2026-06-26",
+          "type": "morning",
+          "reason": "龙虎榜净买入7.37亿，三日涨幅偏离值累计20%，机构资金关注度高",
+          "score": 67
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": 220.88,
+        "current_price": 220.88,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": null,
+        "max_drawdown": null
+      }
+    },
+    {
+      "name": "广合科技",
+      "code": "001389.SZ",
+      "first_recommended": "2026-06-26",
+      "recommendations": [
+        {
+          "date": "2026-06-26",
+          "type": "morning",
+          "reason": "龙虎榜、研报(2/5) | 连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
+          "score": 35
+        },
+        {
+          "date": "2026-06-26",
+          "type": "evening",
+          "reason": "龙虎榜、研报(2/5) | 连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
+          "score": 35
+        },
+        {
+          "date": "2026-06-27",
+          "type": "morning",
+          "reason": "钱三强、龙虎榜、研报(3/5) | 连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
+          "score": 70
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": 220.88,
+        "current_price": 220.88,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": null,
+        "max_drawdown": null
+      }
+    },
+    {
+      "name": "TCL中环",
+      "code": "002129.SZ",
+      "first_recommended": "2026-06-27",
+      "recommendations": [
+        {
+          "date": "2026-06-27",
+          "type": "morning",
+          "reason": "钱三强、龙虎榜(2/5) | 连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
+          "score": 60
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": null,
+        "current_price": null,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": null,
+        "max_drawdown": null
+      }
+    },
+    {
+      "name": "康强电子",
+      "code": "002119.SZ",
+      "first_recommended": "2026-06-27",
+      "recommendations": [
+        {
+          "date": "2026-06-27",
+          "type": "morning",
+          "reason": "钱三强、龙虎榜(2/5) | 日涨幅偏离值达到7%的前5只证券",
+          "score": 60
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": null,
+        "current_price": null,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": null,
+        "max_drawdown": null
+      }
+    },
+    {
+      "name": "航天科技",
+      "code": "000901.SZ",
+      "first_recommended": "2026-06-27",
+      "recommendations": [
+        {
+          "date": "2026-06-27",
+          "type": "morning",
+          "reason": "钱三强、研报(2/5)",
+          "score": 45
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": null,
+        "current_price": null,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": null,
+        "max_drawdown": null
+      }
+    },
+    {
+      "name": "实益达",
+      "code": "002137.SZ",
+      "first_recommended": "2026-06-27",
+      "recommendations": [
+        {
+          "date": "2026-06-27",
+          "type": "morning",
+          "reason": "钱三强、研报(2/5)",
+          "score": 45
+        }
+      ],
+      "backtest": {
+        "price_at_recommend": null,
+        "current_price": null,
+        "return_1d": null,
+        "return_3d": null,
+        "return_5d": null,
+        "return_10d": null,
+        "return_20d": null,
+        "max_return": null,
+        "max_drawdown": null
       }
     }
   ],
-  "last_updated": "2026-06-26"
+  "last_updated": "2026-06-27"
 }

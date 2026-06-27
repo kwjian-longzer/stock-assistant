@@ -10,6 +10,13 @@
 (function () {
   'use strict';
 
+  /* ===================== API 配置 ===================== */
+  // v4: 优先从 API 服务获取数据（本地开发或 VPS），回退到静态 JSON（GitHub Pages）
+  var API_BASE = '';  // 空字符串=同源, 或填 'http://localhost:8765'
+  var API_AVAILABLE = false;  // 运行时检测
+  var AUTO_REFRESH_INTERVAL = 60000;  // 自动刷新间隔（ms），盘中每分钟
+  var autoRefreshTimer = null;
+
   /* ===================== 全局状态 ===================== */
   var appState = {
     currentDate: null,   // null = 最新
@@ -37,6 +44,88 @@
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     });
+  }
+
+  // v4: 从 API 服务获取数据
+  function fetchAPI(endpoint) {
+    var url = API_BASE + endpoint;
+    return fetch(url + (url.indexOf('?') > -1 ? '&' : '?') + 't=' + Date.now())
+      .then(function (r) {
+        if (!r.ok) throw new Error('API HTTP ' + r.status);
+        return r.json();
+      });
+  }
+
+  // v4: 检测 API 是否可用
+  function detectAPI() {
+    return fetch(API_BASE + '/api/health?t=' + Date.now(), { timeout: 3000 })
+      .then(function (r) {
+        if (r.ok) {
+          API_AVAILABLE = true;
+          console.log('[App] API 服务可用，启用实时数据模式');
+        }
+        return r.ok;
+      })
+      .catch(function () {
+        API_AVAILABLE = false;
+        console.log('[App] API 服务不可用，使用静态 JSON 模式');
+        return false;
+      });
+  }
+
+  // v4: 自动刷新看板数据（仅在 API 可用且市场交易时间内）
+  function startAutoRefresh() {
+    if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+    autoRefreshTimer = setInterval(function () {
+      var now = new Date();
+      var mins = now.getHours() * 60 + now.getMinutes();
+      var day = now.getDay();
+      var isWeekday = day >= 1 && day <= 5;
+      var inSession = isWeekday && ((mins >= 570 && mins <= 690) || (mins >= 780 && mins <= 900));
+      if (API_AVAILABLE && inSession) {
+        console.log('[App] 盘中自动刷新...');
+        fetchAPI('/api/dashboard?period=morning').then(function (data) {
+          if (data && data.indices) {
+            appState.latestData = transformAPIData(data);
+            renderDashboard(appState.latestData);
+            updateLastUpdate();
+            updateMarketStatus();
+          }
+        }).catch(function (e) {
+          console.warn('[App] 自动刷新失败', e);
+        });
+      }
+      updateMarketStatus();
+    }, AUTO_REFRESH_INTERVAL);
+  }
+
+  // v4: 将 API 返回的数据转换为前端兼容格式
+  function transformAPIData(apiData) {
+    if (!apiData) return null;
+    var indices = (apiData.indices || []).map(function (idx) {
+      return {
+        name: idx.name,
+        value: String(Math.round(idx.close) || '--'),
+        change: (idx.pct_chg > 0 ? '+' : '') + Number(idx.pct_chg || 0).toFixed(2) + '%'
+      };
+    });
+    var northVal = apiData.north_money && apiData.north_money.north_money;
+    var northFlow = northVal != null ?
+      (northVal >= 0 ? '净流入' : '净流出') + Math.abs(northVal).toFixed(2) + '亿' : '';
+    return {
+      date: apiData.date,
+      type: apiData.period || 'morning',
+      title: '多维市场研报（' + (apiData.period === 'morning' ? '晨报' : apiData.period === 'noon' ? '午报' : '晚报') + '）',
+      score: 0,
+      market: {
+        indices: indices,
+        limit_up: apiData.stats ? apiData.stats.limit_up_count : 0,
+        limit_down: 0,
+        volume: '',
+        north_flow: northFlow
+      },
+      _apiData: apiData  // 保留原始 API 数据供 v4 页面使用
+    };
   }
   function safe(v, d) { return (v === undefined || v === null) ? (d === undefined ? '--' : d) : v; }
   function esc(s) {
@@ -1468,31 +1557,39 @@
   document.addEventListener('DOMContentLoaded', function () {
     initNavigation();
     updateMarketStatus();
-    // 加载数据
-    Promise.all([loadManifest(), loadLatest(), loadHistory()])
+    // v4: 静态优先（GitHub Pages 可用）→ 异步检测 API（仅增强盘中刷新）
+    loadStaticData().then(function () {
+      renderAllPages();
+      updateLastUpdate();
+      updateMarketStatus();
+      console.log('[App] 静态数据加载完成', {
+        manifest: !!appState.manifest,
+        latest: !!appState.latestData
+      });
+      // 异步检测 API（不阻塞渲染，仅用于盘中自动刷新增强）
+      detectAPI().then(function (apiOK) {
+        if (apiOK) {
+          console.log('[App] API 可用，启用盘中自动刷新增强');
+          startAutoRefresh();
+        }
+      });
+    }).catch(function (e) {
+      console.error('[App] 初始化失败', e);
+      appState.manifest = FALLBACK_MANIFEST;
+      appState.latestData = buildFallbackLatest();
+      appState.historyData = { goldStocks: FALLBACK_GOLD, heatTracking: buildFallbackHeat() };
+      renderAllPages();
+      updateLastUpdate();
+    });
+  });
+
+  // v4: 静态数据加载（GitHub Pages 模式）
+  function loadStaticData() {
+    return Promise.all([loadManifest(), loadLatest(), loadHistory()])
       .then(function (results) {
         appState.manifest = results[0];
         appState.latestData = results[1];
         appState.historyData = results[2];
-        renderAllPages();
-        updateLastUpdate();
-        updateMarketStatus();
-        console.log('[App] 数据加载完成', {
-          manifest: !!appState.manifest,
-          latest: !!appState.latestData,
-          gold: !!(appState.historyData.goldStocks && appState.historyData.goldStocks.stocks),
-          heat: !!(appState.historyData.heatTracking && appState.historyData.heatTracking.sectors)
-        });
-      })
-      .catch(function (e) {
-        console.error('[App] 初始化失败', e);
-        appState.manifest = FALLBACK_MANIFEST;
-        appState.latestData = buildFallbackLatest();
-        appState.historyData = { goldStocks: FALLBACK_GOLD, heatTracking: buildFallbackHeat() };
-        renderAllPages();
-        updateLastUpdate();
       });
-    // 每分钟更新市场状态
-    setInterval(updateMarketStatus, 60000);
-  });
+  }
 })();

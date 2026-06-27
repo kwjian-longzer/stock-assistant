@@ -1,0 +1,91 @@
+{
+  "date": "2026-06-27",
+  "gold_stocks": [
+    {
+      "code": "001389.SZ",
+      "name": "广合科技",
+      "strategy": "两强命中",
+      "industry": "元器件",
+      "close": 220.88,
+      "pct_chg": 10.0,
+      "turnover": 12.87,
+      "dragon_net_buy": 7.37,
+      "dragon_reason": "连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
+      "vip_count": 1,
+      "dimensions": [
+        "钱三强",
+        "龙虎榜",
+        "研报"
+      ],
+      "score": 70,
+      "resonance": 3
+    },
+    {
+      "code": "002129.SZ",
+      "name": "TCL中环",
+      "strategy": "两强命中",
+      "industry": "电气设备",
+      "close": 11.19,
+      "pct_chg": 10.0295,
+      "turnover": 12.85,
+      "dragon_net_buy": 11.42,
+      "dragon_reason": "连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
+      "dimensions": [
+        "钱三强",
+        "龙虎榜"
+      ],
+      "score": 60,
+      "resonance": 2
+    },
+    {
+      "code": "002119.SZ",
+      "name": "康强电子",
+      "strategy": "两强命中",
+      "industry": "半导体",
+      "close": 37.02,
+      "pct_chg": 10.0149,
+      "turnover": 23.14,
+      "dragon_net_buy": 1.64,
+      "dragon_reason": "日涨幅偏离值达到7%的前5只证券",
+      "dimensions": [
+        "钱三强",
+        "龙虎榜"
+      ],
+      "score": 60,
+      "resonance": 2
+    },
+    {
+      "code": "000901.SZ",
+      "name": "航天科技",
+      "strategy": "两强命中",
+      "industry": "汽车配件",
+      "close": 17.61,
+      "pct_chg": 0.8591,
+      "turnover": 3.61,
+      "vip_count": 1,
+      "dimensions": [
+        "钱三强",
+        "研报"
+      ],
+      "score": 45,
+      "resonance": 2
+    },
+    {
+      "code": "002137.SZ",
+      "name": "实益达",
+      "strategy": "两强命中",
+      "industry": "元器件",
+      "close": 11.02,
+      "pct_chg": 2.8945,
+      "turnover": 23.76,
+      "vip_count": 1,
+      "dimensions": [
+        "钱三强",
+        "研报"
+      ],
+      "score": 45,
+      "resonance": 2
+    }
+  ],
+  "total_candidates": 7
+}
