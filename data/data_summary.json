@@ -1,10 +1,10 @@
 {
-  "date": "2026-06-26",
+  "date": "2026-06-27",
   "period": "morning",
   "meta": {
-    "trade_date": "20260626",
+    "trade_date": "20260627",
     "mode": "morning",
-    "date": "2026-06-26"
+    "date": "2026-06-27"
   },
   "insights": [
     {
@@ -44,15 +44,15 @@
     },
     {
       "category": "海外市场",
-      "signal_text": "美元指数 下跌 0.13%（-0.13点），报101.33",
+      "signal_text": "美元指数 下跌 0.10%（-0.10点），报101.36",
       "a_share_impact": "美元走弱利好人民币资产",
       "confidence": "medium",
       "signal_time": ""
     },
     {
       "category": "海外市场",
-      "signal_text": "WTI原油 下跌 0.07%（-0.05点），报69.22",
-      "a_share_impact": "原油下跌利好下游用油行业",
+      "signal_text": "WTI原油 上涨 0.21%（+0.15点），报70.39",
+      "a_share_impact": "原油上涨利好石化上游，压制下游用油",
       "confidence": "medium",
       "signal_time": ""
     },
@@ -162,6 +162,13 @@
       "signal_time": ""
     },
     {
+      "category": "资金面",
+      "signal_text": "融资余额15131亿(SSE)",
+      "a_share_impact": "杠杆资金维持高位",
+      "confidence": "low",
+      "signal_time": ""
+    },
+    {
       "category": "龙虎榜",
       "signal_text": "TCL中环(002129.SZ) 净买入11.4亿",
       "a_share_impact": "TCL中环获资金关注，连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离",
@@ -198,10 +205,31 @@
     },
     {
       "category": "财联社舆情",
-      "signal_text": "近24h电报20条，红色0条，海外3商品5宏观2个股1",
-      "a_share_impact": "舆情平稳",
+      "signal_text": "近24h电报123条，红色84条，海外17商品13宏观3个股43",
+      "a_share_impact": "舆情密度较高，注意消息面驱动",
       "confidence": "medium",
       "signal_time": ""
+    },
+    {
+      "category": "跨市场映射",
+      "signal_text": "周六你需要知道的隔夜全球要闻：美军再次对伊朗发动打击；黎以美达成三方框架协议；纳指小幅收跌，存储股大幅回调，微软、苹果反",
+      "a_share_impact": "A股半导体/存储芯片板块承压",
+      "confidence": "high",
+      "signal_time": "22:30"
+    },
+    {
+      "category": "跨市场映射",
+      "signal_text": "周六你需要知道的隔夜全球要闻：美军再次对伊朗发动打击；黎以美达成三方框架协议；纳指小幅收跌，存储股大幅回调，微软、苹果反",
+      "a_share_impact": "A股AI/算力板块情绪受压",
+      "confidence": "medium",
+      "signal_time": "22:30"
+    },
+    {
+      "category": "跨市场映射",
+      "signal_text": "纳指收跌0.2% 芯片股下挫 西部数据大跌13%",
+      "a_share_impact": "A股半导体/存储芯片板块承压",
+      "confidence": "high",
+      "signal_time": "20:02"
     },
     {
       "category": "跨市场映射",
@@ -209,6 +237,27 @@
       "a_share_impact": "A股AI/算力板块情绪受压",
       "confidence": "medium",
       "signal_time": "15:32"
+    },
+    {
+      "category": "跨市场映射",
+      "signal_text": "费城半导体指数日内跌幅扩大至5%",
+      "a_share_impact": "A股半导体/存储芯片板块承压",
+      "confidence": "high",
+      "signal_time": "13:39"
+    },
+    {
+      "category": "跨市场映射",
+      "signal_text": "美股光通信板块集体低开 Lumentum跌超7%",
+      "a_share_impact": "A股光模块/光通信板块承压",
+      "confidence": "medium",
+      "signal_time": "13:33"
+    },
+    {
+      "category": "跨市场映射",
+      "signal_text": "美股三大指数集体低开 存储芯片概念走低",
+      "a_share_impact": "A股半导体/存储芯片板块承压",
+      "confidence": "high",
+      "signal_time": "13:30"
     }
   ],
   "stats": {
@@ -219,11 +268,11 @@
   },
   "indices": [
     {
-      "id": 21,
+      "id": 41,
       "name": "上证指数",
       "code": "000001.SH",
-      "trade_date": "2026-06-26",
-      "fetch_time": "2026-06-26 17:30:32",
+      "trade_date": "2026-06-27",
+      "fetch_time": "2026-06-27 04:33:16",
       "source": "tushare_close",
       "close": 4027.2648,
       "pct_chg": -2.258,
@@ -232,11 +281,11 @@
       "is_realtime": 0
     },
     {
-      "id": 23,
+      "id": 43,
       "name": "创业板指",
       "code": "399006.SZ",
-      "trade_date": "2026-06-26",
-      "fetch_time": "2026-06-26 17:30:32",
+      "trade_date": "2026-06-27",
+      "fetch_time": "2026-06-27 04:33:17",
       "source": "tushare_close",
       "close": 4194.2089,
       "pct_chg": -4.066,
@@ -245,11 +294,11 @@
       "is_realtime": 0
     },
     {
-      "id": 22,
+      "id": 42,
       "name": "深证成指",
       "code": "399001.SZ",
-      "trade_date": "2026-06-26",
-      "fetch_time": "2026-06-26 17:30:32",
+      "trade_date": "2026-06-27",
+      "fetch_time": "2026-06-27 04:33:16",
       "source": "tushare_close",
       "close": 15782.2229,
       "pct_chg": -3.438,
@@ -258,11 +307,11 @@
       "is_realtime": 0
     },
     {
-      "id": 24,
+      "id": 44,
       "name": "科创50",
       "code": "000688.SH",
-      "trade_date": "2026-06-26",
-      "fetch_time": "2026-06-26 17:30:32",
+      "trade_date": "2026-06-27",
+      "fetch_time": "2026-06-27 04:33:17",
       "source": "tushare_close",
       "close": 2032.2842,
       "pct_chg": -1.648,
@@ -273,175 +322,175 @@
   ],
   "sectors_top": [
     {
-      "id": 151,
-      "trade_date": "2026-06-26",
+      "id": 301,
+      "trade_date": "2026-06-27",
       "industry": "航空",
       "net_mf_amount": 13.9,
-      "fetch_time": "2026-06-26 17:30:32"
+      "fetch_time": "2026-06-27 04:33:17"
     },
     {
-      "id": 152,
-      "trade_date": "2026-06-26",
+      "id": 302,
+      "trade_date": "2026-06-27",
       "industry": "陶瓷",
       "net_mf_amount": 8.05,
-      "fetch_time": "2026-06-26 17:30:32"
+      "fetch_time": "2026-06-27 04:33:17"
     },
     {
-      "id": 153,
-      "trade_date": "2026-06-26",
+      "id": 303,
+      "trade_date": "2026-06-27",
       "industry": "玻璃",
       "net_mf_amount": 7.27,
-      "fetch_time": "2026-06-26 17:30:32"
+      "fetch_time": "2026-06-27 04:33:17"
     },
     {
-      "id": 154,
-      "trade_date": "2026-06-26",
+      "id": 304,
+      "trade_date": "2026-06-27",
       "industry": "园区开发",
       "net_mf_amount": 2.74,
-      "fetch_time": "2026-06-26 17:30:32"
+      "fetch_time": "2026-06-27 04:33:17"
     },
     {
-      "id": 155,
-      "trade_date": "2026-06-26",
+      "id": 305,
+      "trade_date": "2026-06-27",
       "industry": "装修装饰",
       "net_mf_amount": 2.43,
-      "fetch_time": "2026-06-26 17:30:32"
+      "fetch_time": "2026-06-27 04:33:17"
     },
     {
-      "id": 156,
-      "trade_date": "2026-06-26",
+      "id": 306,
+      "trade_date": "2026-06-27",
       "industry": "电信运营",
       "net_mf_amount": 1.57,
-      "fetch_time": "2026-06-26 17:30:32"
+      "fetch_time": "2026-06-27 04:33:17"
     },
     {
-      "id": 157,
-      "trade_date": "2026-06-26",
+      "id": 307,
+      "trade_date": "2026-06-27",
       "industry": "饲料",
       "net_mf_amount": 1.09,
-      "fetch_time": "2026-06-26 17:30:32"
+      "fetch_time": "2026-06-27 04:33:17"
     },
     {
-      "id": 158,
-      "trade_date": "2026-06-26",
+      "id": 308,
+      "trade_date": "2026-06-27",
       "industry": "电器连锁",
       "net_mf_amount": 0.15,
-      "fetch_time": "2026-06-26 17:30:32"
+      "fetch_time": "2026-06-27 04:33:17"
     },
     {
-      "id": 159,
-      "trade_date": "2026-06-26",
+      "id": 309,
+      "trade_date": "2026-06-27",
       "industry": "其他",
       "net_mf_amount": -0.03,
-      "fetch_time": "2026-06-26 17:30:32"
+      "fetch_time": "2026-06-27 04:33:17"
     },
     {
-      "id": 160,
-      "trade_date": "2026-06-26",
+      "id": 310,
+      "trade_date": "2026-06-27",
       "industry": "公共交通",
       "net_mf_amount": -0.11,
-      "fetch_time": "2026-06-26 17:30:32"
+      "fetch_time": "2026-06-27 04:33:17"
     }
   ],
   "north_money": {
-    "id": 6,
-    "trade_date": "2026-06-26",
+    "id": 11,
+    "trade_date": "2026-06-27",
     "north_money": 41.31,
     "hgt": 17.56,
     "sgt": 23.75,
     "south_money": 5.41,
-    "fetch_time": "2026-06-26 17:30:32"
+    "fetch_time": "2026-06-27 04:33:17"
   },
   "dragon_tiger": [
     {
-      "id": 31,
-      "trade_date": "2026-06-26",
+      "id": 61,
+      "trade_date": "2026-06-27",
       "ts_code": "002129.SZ",
       "name": "TCL中环",
       "net_buy": 11.42,
       "reason": "连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
-      "fetch_time": "2026-06-26 17:16:18"
+      "fetch_time": "2026-06-27 04:27:35"
     },
     {
-      "id": 32,
-      "trade_date": "2026-06-26",
+      "id": 62,
+      "trade_date": "2026-06-27",
       "ts_code": "001389.SZ",
       "name": "广合科技",
       "net_buy": 7.37,
       "reason": "连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
-      "fetch_time": "2026-06-26 17:16:18"
+      "fetch_time": "2026-06-27 04:27:35"
     },
     {
-      "id": 33,
-      "trade_date": "2026-06-26",
+      "id": 63,
+      "trade_date": "2026-06-27",
       "ts_code": "001399.SZ",
       "name": "惠科股份",
       "net_buy": 4.18,
       "reason": "无价格涨跌幅限制的证券",
-      "fetch_time": "2026-06-26 17:16:18"
+      "fetch_time": "2026-06-27 04:27:35"
     },
     {
-      "id": 34,
-      "trade_date": "2026-06-26",
+      "id": 64,
+      "trade_date": "2026-06-27",
       "ts_code": "600667.SH",
       "name": "太极实业",
       "net_buy": 3.36,
       "reason": "有价格涨跌幅限制的日换手率达到20%的前五只证券",
-      "fetch_time": "2026-06-26 17:16:18"
+      "fetch_time": "2026-06-27 04:27:35"
     },
     {
-      "id": 35,
-      "trade_date": "2026-06-26",
+      "id": 65,
+      "trade_date": "2026-06-27",
       "ts_code": "603002.SH",
       "name": "宏昌电子",
       "net_buy": 3.24,
       "reason": "有价格涨跌幅限制的日价格振幅达到15%的前五只证券",
-      "fetch_time": "2026-06-26 17:16:18"
+      "fetch_time": "2026-06-27 04:27:35"
     },
     {
-      "id": 36,
-      "trade_date": "2026-06-26",
+      "id": 66,
+      "trade_date": "2026-06-27",
       "ts_code": "002354.SZ",
       "name": "天娱数科",
       "net_buy": 2.99,
       "reason": "日涨幅偏离值达到7%的前5只证券",
-      "fetch_time": "2026-06-26 17:16:18"
+      "fetch_time": "2026-06-27 04:27:35"
     },
     {
-      "id": 37,
-      "trade_date": "2026-06-26",
+      "id": 67,
+      "trade_date": "2026-06-27",
       "ts_code": "688409.SH",
       "name": "富创精密",
       "net_buy": 2.69,
       "reason": "有价格涨跌幅限制的日收盘价格涨幅达到15%的前五只证券",
-      "fetch_time": "2026-06-26 17:16:18"
+      "fetch_time": "2026-06-27 04:27:35"
     },
     {
-      "id": 38,
-      "trade_date": "2026-06-26",
+      "id": 68,
+      "trade_date": "2026-06-27",
       "ts_code": "600545.SH",
       "name": "卓郎智能",
       "net_buy": 2.25,
       "reason": "有价格涨跌幅限制的日收盘价格涨幅偏离值达到7%的前五只证券",
-      "fetch_time": "2026-06-26 17:16:18"
+      "fetch_time": "2026-06-27 04:27:35"
     },
     {
-      "id": 39,
-      "trade_date": "2026-06-26",
+      "id": 69,
+      "trade_date": "2026-06-27",
       "ts_code": "600520.SH",
       "name": "三佳科技",
       "net_buy": 2.15,
       "reason": "有价格涨跌幅限制的日换手率达到20%的前五只证券",
-      "fetch_time": "2026-06-26 17:16:18"
+      "fetch_time": "2026-06-27 04:27:35"
     },
     {
-      "id": 40,
-      "trade_date": "2026-06-26",
+      "id": 70,
+      "trade_date": "2026-06-27",
       "ts_code": "601016.SH",
       "name": "节能风电",
       "net_buy": 2.09,
       "reason": "有价格涨跌幅限制的日收盘价格涨幅偏离值达到7%的前五只证券",
-      "fetch_time": "2026-06-26 17:16:18"
+      "fetch_time": "2026-06-27 04:27:35"
     }
   ],
   "limit_up": []
