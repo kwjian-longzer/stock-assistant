@@ -219,8 +219,8 @@ def analyze_limit_up(db, date_str):
 
 
 def analyze_cls_sentiment(db, date_str):
-    """财联社舆情：从 cls_telegraph 提取信号并跨市场映射"""
-    telegraphs = db.query_telegraphs(date=date_str, limit=200)
+    """财联社舆情：从 cls_telegraph 提取信号并跨市场映射（24h跨天查询）"""
+    telegraphs = db.query_telegraphs_recent(hours=24, limit=500)
     signals = {"overseas_market": [], "commodity": [], "macro": [],
                "a_share_individual": [], "geopolitical": []}
     for t in telegraphs:

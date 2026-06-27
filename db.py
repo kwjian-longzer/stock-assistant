@@ -544,6 +544,43 @@ class DB:
             result.append(item)
         return result
 
+    def query_telegraphs_recent(self, hours: int = 24, is_red_only: bool = False,
+                                limit: int = 500) -> List[dict]:
+        """查询最近N小时的电报（跨天查询，用于晨报覆盖隔夜信号）
+
+        Args:
+            hours: 查询最近多少小时
+            is_red_only: 只查红色重要电报
+            limit: 最多返回条数
+
+        Returns:
+            list: 电报列表，按时间倒序
+        """
+        cutoff_ts = int((datetime.datetime.now() -
+                         datetime.timedelta(hours=hours)).timestamp())
+        conn = self._conn()
+        sql = (
+            "SELECT t.*, GROUP_CONCAT(s.stock_name, '|') as stocks_str "
+            "FROM cls_telegraph t "
+            "LEFT JOIN cls_telegraph_stock s ON t.telegraph_id = s.telegraph_id "
+            "WHERE t.timestamp >= ? "
+        )
+        params = [cutoff_ts]
+        if is_red_only:
+            sql += "AND t.is_red = 1 "
+        sql += "GROUP BY t.telegraph_id ORDER BY t.timestamp DESC LIMIT ?"
+        params.append(limit)
+        cur = conn.execute(sql, params)
+        rows = cur.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            item = dict(row)
+            stocks_str = item.pop("stocks_str", "") or ""
+            item["stocks"] = [s for s in stocks_str.split("|") if s]
+            result.append(item)
+        return result
+
     def query_telegraph_stats(self, date: str = None) -> dict:
         """查询当日电报统计
 

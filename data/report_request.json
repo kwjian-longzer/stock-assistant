@@ -1,14 +1,14 @@
 {
-  "date": "2026-06-26",
+  "date": "2026-06-27",
   "period": "morning",
   "type_cn": "晨报",
   "data_summary": {
-    "date": "2026-06-26",
+    "date": "2026-06-27",
     "period": "morning",
     "meta": {
-      "trade_date": "20260626",
+      "trade_date": "20260627",
       "mode": "morning",
-      "date": "2026-06-26"
+      "date": "2026-06-27"
     },
     "insights": [
       {
@@ -48,15 +48,15 @@
       },
       {
         "category": "海外市场",
-        "signal_text": "美元指数 下跌 0.13%（-0.13点），报101.33",
+        "signal_text": "美元指数 下跌 0.10%（-0.10点），报101.36",
         "a_share_impact": "美元走弱利好人民币资产",
         "confidence": "medium",
         "signal_time": ""
       },
       {
         "category": "海外市场",
-        "signal_text": "WTI原油 下跌 0.07%（-0.05点），报69.22",
-        "a_share_impact": "原油下跌利好下游用油行业",
+        "signal_text": "WTI原油 上涨 0.21%（+0.15点），报70.39",
+        "a_share_impact": "原油上涨利好石化上游，压制下游用油",
         "confidence": "medium",
         "signal_time": ""
       },
@@ -166,6 +166,13 @@
         "signal_time": ""
       },
       {
+        "category": "资金面",
+        "signal_text": "融资余额15131亿(SSE)",
+        "a_share_impact": "杠杆资金维持高位",
+        "confidence": "low",
+        "signal_time": ""
+      },
+      {
         "category": "龙虎榜",
         "signal_text": "TCL中环(002129.SZ) 净买入11.4亿",
         "a_share_impact": "TCL中环获资金关注，连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离",
@@ -202,10 +209,31 @@
       },
       {
         "category": "财联社舆情",
-        "signal_text": "近24h电报20条，红色0条，海外3商品5宏观2个股1",
-        "a_share_impact": "舆情平稳",
+        "signal_text": "近24h电报123条，红色84条，海外17商品13宏观3个股43",
+        "a_share_impact": "舆情密度较高，注意消息面驱动",
         "confidence": "medium",
         "signal_time": ""
+      },
+      {
+        "category": "跨市场映射",
+        "signal_text": "周六你需要知道的隔夜全球要闻：美军再次对伊朗发动打击；黎以美达成三方框架协议；纳指小幅收跌，存储股大幅回调，微软、苹果反",
+        "a_share_impact": "A股半导体/存储芯片板块承压",
+        "confidence": "high",
+        "signal_time": "22:30"
+      },
+      {
+        "category": "跨市场映射",
+        "signal_text": "周六你需要知道的隔夜全球要闻：美军再次对伊朗发动打击；黎以美达成三方框架协议；纳指小幅收跌，存储股大幅回调，微软、苹果反",
+        "a_share_impact": "A股AI/算力板块情绪受压",
+        "confidence": "medium",
+        "signal_time": "22:30"
+      },
+      {
+        "category": "跨市场映射",
+        "signal_text": "纳指收跌0.2% 芯片股下挫 西部数据大跌13%",
+        "a_share_impact": "A股半导体/存储芯片板块承压",
+        "confidence": "high",
+        "signal_time": "20:02"
       },
       {
         "category": "跨市场映射",
@@ -213,6 +241,27 @@
         "a_share_impact": "A股AI/算力板块情绪受压",
         "confidence": "medium",
         "signal_time": "15:32"
+      },
+      {
+        "category": "跨市场映射",
+        "signal_text": "费城半导体指数日内跌幅扩大至5%",
+        "a_share_impact": "A股半导体/存储芯片板块承压",
+        "confidence": "high",
+        "signal_time": "13:39"
+      },
+      {
+        "category": "跨市场映射",
+        "signal_text": "美股光通信板块集体低开 Lumentum跌超7%",
+        "a_share_impact": "A股光模块/光通信板块承压",
+        "confidence": "medium",
+        "signal_time": "13:33"
+      },
+      {
+        "category": "跨市场映射",
+        "signal_text": "美股三大指数集体低开 存储芯片概念走低",
+        "a_share_impact": "A股半导体/存储芯片板块承压",
+        "confidence": "high",
+        "signal_time": "13:30"
       }
     ],
     "stats": {
@@ -223,11 +272,11 @@
     },
     "indices": [
       {
-        "id": 21,
+        "id": 41,
         "name": "上证指数",
         "code": "000001.SH",
-        "trade_date": "2026-06-26",
-        "fetch_time": "2026-06-26 17:30:32",
+        "trade_date": "2026-06-27",
+        "fetch_time": "2026-06-27 04:33:16",
         "source": "tushare_close",
         "close": 4027.2648,
         "pct_chg": -2.258,
@@ -236,11 +285,11 @@
         "is_realtime": 0
       },
       {
-        "id": 23,
+        "id": 43,
         "name": "创业板指",
         "code": "399006.SZ",
-        "trade_date": "2026-06-26",
-        "fetch_time": "2026-06-26 17:30:32",
+        "trade_date": "2026-06-27",
+        "fetch_time": "2026-06-27 04:33:17",
         "source": "tushare_close",
         "close": 4194.2089,
         "pct_chg": -4.066,
@@ -249,11 +298,11 @@
         "is_realtime": 0
       },
       {
-        "id": 22,
+        "id": 42,
         "name": "深证成指",
         "code": "399001.SZ",
-        "trade_date": "2026-06-26",
-        "fetch_time": "2026-06-26 17:30:32",
+        "trade_date": "2026-06-27",
+        "fetch_time": "2026-06-27 04:33:16",
         "source": "tushare_close",
         "close": 15782.2229,
         "pct_chg": -3.438,
@@ -262,11 +311,11 @@
         "is_realtime": 0
       },
       {
-        "id": 24,
+        "id": 44,
         "name": "科创50",
         "code": "000688.SH",
-        "trade_date": "2026-06-26",
-        "fetch_time": "2026-06-26 17:30:32",
+        "trade_date": "2026-06-27",
+        "fetch_time": "2026-06-27 04:33:17",
         "source": "tushare_close",
         "close": 2032.2842,
         "pct_chg": -1.648,
@@ -277,515 +326,664 @@
     ],
     "sectors_top": [
       {
-        "id": 151,
-        "trade_date": "2026-06-26",
+        "id": 301,
+        "trade_date": "2026-06-27",
         "industry": "航空",
         "net_mf_amount": 13.9,
-        "fetch_time": "2026-06-26 17:30:32"
+        "fetch_time": "2026-06-27 04:33:17"
       },
       {
-        "id": 152,
-        "trade_date": "2026-06-26",
+        "id": 302,
+        "trade_date": "2026-06-27",
         "industry": "陶瓷",
         "net_mf_amount": 8.05,
-        "fetch_time": "2026-06-26 17:30:32"
+        "fetch_time": "2026-06-27 04:33:17"
       },
       {
-        "id": 153,
-        "trade_date": "2026-06-26",
+        "id": 303,
+        "trade_date": "2026-06-27",
         "industry": "玻璃",
         "net_mf_amount": 7.27,
-        "fetch_time": "2026-06-26 17:30:32"
+        "fetch_time": "2026-06-27 04:33:17"
       },
       {
-        "id": 154,
-        "trade_date": "2026-06-26",
+        "id": 304,
+        "trade_date": "2026-06-27",
         "industry": "园区开发",
         "net_mf_amount": 2.74,
-        "fetch_time": "2026-06-26 17:30:32"
+        "fetch_time": "2026-06-27 04:33:17"
       },
       {
-        "id": 155,
-        "trade_date": "2026-06-26",
+        "id": 305,
+        "trade_date": "2026-06-27",
         "industry": "装修装饰",
         "net_mf_amount": 2.43,
-        "fetch_time": "2026-06-26 17:30:32"
+        "fetch_time": "2026-06-27 04:33:17"
       },
       {
-        "id": 156,
-        "trade_date": "2026-06-26",
+        "id": 306,
+        "trade_date": "2026-06-27",
         "industry": "电信运营",
         "net_mf_amount": 1.57,
-        "fetch_time": "2026-06-26 17:30:32"
+        "fetch_time": "2026-06-27 04:33:17"
       },
       {
-        "id": 157,
-        "trade_date": "2026-06-26",
+        "id": 307,
+        "trade_date": "2026-06-27",
         "industry": "饲料",
         "net_mf_amount": 1.09,
-        "fetch_time": "2026-06-26 17:30:32"
+        "fetch_time": "2026-06-27 04:33:17"
       },
       {
-        "id": 158,
-        "trade_date": "2026-06-26",
+        "id": 308,
+        "trade_date": "2026-06-27",
         "industry": "电器连锁",
         "net_mf_amount": 0.15,
-        "fetch_time": "2026-06-26 17:30:32"
+        "fetch_time": "2026-06-27 04:33:17"
       },
       {
-        "id": 159,
-        "trade_date": "2026-06-26",
+        "id": 309,
+        "trade_date": "2026-06-27",
         "industry": "其他",
         "net_mf_amount": -0.03,
-        "fetch_time": "2026-06-26 17:30:32"
+        "fetch_time": "2026-06-27 04:33:17"
       },
       {
-        "id": 160,
-        "trade_date": "2026-06-26",
+        "id": 310,
+        "trade_date": "2026-06-27",
         "industry": "公共交通",
         "net_mf_amount": -0.11,
-        "fetch_time": "2026-06-26 17:30:32"
+        "fetch_time": "2026-06-27 04:33:17"
       }
     ],
     "north_money": {
-      "id": 6,
-      "trade_date": "2026-06-26",
+      "id": 11,
+      "trade_date": "2026-06-27",
       "north_money": 41.31,
       "hgt": 17.56,
       "sgt": 23.75,
       "south_money": 5.41,
-      "fetch_time": "2026-06-26 17:30:32"
+      "fetch_time": "2026-06-27 04:33:17"
     },
     "dragon_tiger": [
       {
-        "id": 31,
-        "trade_date": "2026-06-26",
+        "id": 61,
+        "trade_date": "2026-06-27",
         "ts_code": "002129.SZ",
         "name": "TCL中环",
         "net_buy": 11.42,
         "reason": "连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
-        "fetch_time": "2026-06-26 17:16:18"
+        "fetch_time": "2026-06-27 04:27:35"
       },
       {
-        "id": 32,
-        "trade_date": "2026-06-26",
+        "id": 62,
+        "trade_date": "2026-06-27",
         "ts_code": "001389.SZ",
         "name": "广合科技",
         "net_buy": 7.37,
         "reason": "连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
-        "fetch_time": "2026-06-26 17:16:18"
+        "fetch_time": "2026-06-27 04:27:35"
       },
       {
-        "id": 33,
-        "trade_date": "2026-06-26",
+        "id": 63,
+        "trade_date": "2026-06-27",
         "ts_code": "001399.SZ",
         "name": "惠科股份",
         "net_buy": 4.18,
         "reason": "无价格涨跌幅限制的证券",
-        "fetch_time": "2026-06-26 17:16:18"
+        "fetch_time": "2026-06-27 04:27:35"
       },
       {
-        "id": 34,
-        "trade_date": "2026-06-26",
+        "id": 64,
+        "trade_date": "2026-06-27",
         "ts_code": "600667.SH",
         "name": "太极实业",
         "net_buy": 3.36,
         "reason": "有价格涨跌幅限制的日换手率达到20%的前五只证券",
-        "fetch_time": "2026-06-26 17:16:18"
+        "fetch_time": "2026-06-27 04:27:35"
       },
       {
-        "id": 35,
-        "trade_date": "2026-06-26",
+        "id": 65,
+        "trade_date": "2026-06-27",
         "ts_code": "603002.SH",
         "name": "宏昌电子",
         "net_buy": 3.24,
         "reason": "有价格涨跌幅限制的日价格振幅达到15%的前五只证券",
-        "fetch_time": "2026-06-26 17:16:18"
+        "fetch_time": "2026-06-27 04:27:35"
       },
       {
-        "id": 36,
-        "trade_date": "2026-06-26",
+        "id": 66,
+        "trade_date": "2026-06-27",
         "ts_code": "002354.SZ",
         "name": "天娱数科",
         "net_buy": 2.99,
         "reason": "日涨幅偏离值达到7%的前5只证券",
-        "fetch_time": "2026-06-26 17:16:18"
+        "fetch_time": "2026-06-27 04:27:35"
       },
       {
-        "id": 37,
-        "trade_date": "2026-06-26",
+        "id": 67,
+        "trade_date": "2026-06-27",
         "ts_code": "688409.SH",
         "name": "富创精密",
         "net_buy": 2.69,
         "reason": "有价格涨跌幅限制的日收盘价格涨幅达到15%的前五只证券",
-        "fetch_time": "2026-06-26 17:16:18"
+        "fetch_time": "2026-06-27 04:27:35"
       },
       {
-        "id": 38,
-        "trade_date": "2026-06-26",
+        "id": 68,
+        "trade_date": "2026-06-27",
         "ts_code": "600545.SH",
         "name": "卓郎智能",
         "net_buy": 2.25,
         "reason": "有价格涨跌幅限制的日收盘价格涨幅偏离值达到7%的前五只证券",
-        "fetch_time": "2026-06-26 17:16:18"
+        "fetch_time": "2026-06-27 04:27:35"
       },
       {
-        "id": 39,
-        "trade_date": "2026-06-26",
+        "id": 69,
+        "trade_date": "2026-06-27",
         "ts_code": "600520.SH",
         "name": "三佳科技",
         "net_buy": 2.15,
         "reason": "有价格涨跌幅限制的日换手率达到20%的前五只证券",
-        "fetch_time": "2026-06-26 17:16:18"
+        "fetch_time": "2026-06-27 04:27:35"
       },
       {
-        "id": 40,
-        "trade_date": "2026-06-26",
+        "id": 70,
+        "trade_date": "2026-06-27",
         "ts_code": "601016.SH",
         "name": "节能风电",
         "net_buy": 2.09,
         "reason": "有价格涨跌幅限制的日收盘价格涨幅偏离值达到7%的前五只证券",
-        "fetch_time": "2026-06-26 17:16:18"
+        "fetch_time": "2026-06-27 04:27:35"
       }
     ],
     "limit_up": []
   },
   "insights": [
     {
-      "id": 198,
-      "date": "2026-06-26",
+      "id": 325,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "海外市场",
       "signal_text": "道琼斯 上涨 0.65%（+299.97点），报46247.29",
       "a_share_impact": "美股走强，影响A股高开情绪",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 199,
-      "date": "2026-06-26",
+      "id": 326,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "海外市场",
       "signal_text": "纳斯达克 上涨 0.44%（+99.37点），报22484.07",
       "a_share_impact": "美股走强，影响A股高开情绪",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 200,
-      "date": "2026-06-26",
+      "id": 327,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "海外市场",
       "signal_text": "标普500 上涨 0.59%（+38.98点），报6643.70",
       "a_share_impact": "美股走强，影响A股高开情绪",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 201,
-      "date": "2026-06-26",
+      "id": 328,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "海外市场",
       "signal_text": "恒生指数 下跌 1.76%（-405.05点），报22671.86",
       "a_share_impact": "港股走弱，影响A股蓝筹板块情绪",
       "confidence": "high",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 202,
-      "date": "2026-06-26",
+      "id": 329,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "海外市场",
       "signal_text": "恒生科技 下跌 0.78%（-34.38点），报4371.54",
       "a_share_impact": "港股走弱，影响A股科技板块情绪",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 203,
-      "date": "2026-06-26",
+      "id": 330,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "海外市场",
-      "signal_text": "美元指数 下跌 0.13%（-0.13点），报101.33",
+      "signal_text": "美元指数 下跌 0.10%（-0.10点），报101.36",
       "a_share_impact": "美元走弱利好人民币资产",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 204,
-      "date": "2026-06-26",
+      "id": 331,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "海外市场",
-      "signal_text": "WTI原油 下跌 0.07%（-0.05点），报69.22",
-      "a_share_impact": "原油下跌利好下游用油行业",
+      "signal_text": "WTI原油 上涨 0.21%（+0.15点），报70.39",
+      "a_share_impact": "原油上涨利好石化上游，压制下游用油",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 205,
-      "date": "2026-06-26",
+      "id": 332,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "A股盘面",
       "signal_text": "上证指数 下跌 2.26%，收4027.26",
       "a_share_impact": "权重股走弱，市场情绪偏空",
       "confidence": "high",
       "signal_time": "2026-",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 206,
-      "date": "2026-06-26",
+      "id": 333,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "A股盘面",
       "signal_text": "创业板指 下跌 4.07%，收4194.21",
       "a_share_impact": "成长股走弱，题材退潮",
       "confidence": "high",
       "signal_time": "2026-",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 207,
-      "date": "2026-06-26",
+      "id": 334,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "A股盘面",
       "signal_text": "深证成指 下跌 3.44%，收15782.22",
       "a_share_impact": "中小盘承压",
       "confidence": "high",
       "signal_time": "2026-",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 208,
-      "date": "2026-06-26",
+      "id": 335,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "A股盘面",
       "signal_text": "科创50 下跌 1.65%，收2032.28",
       "a_share_impact": "科创板资金流出",
       "confidence": "high",
       "signal_time": "2026-",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 209,
-      "date": "2026-06-26",
+      "id": 336,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "板块资金",
       "signal_text": "航空 净流入13.9亿",
       "a_share_impact": "航空板块资金大幅流入，关注龙头",
       "confidence": "high",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 210,
-      "date": "2026-06-26",
+      "id": 337,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "板块资金",
       "signal_text": "陶瓷 净流入8.1亿",
       "a_share_impact": "陶瓷板块资金大幅流入，关注龙头",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 211,
-      "date": "2026-06-26",
+      "id": 338,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "板块资金",
       "signal_text": "玻璃 净流入7.3亿",
       "a_share_impact": "玻璃板块资金大幅流入，关注龙头",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 212,
-      "date": "2026-06-26",
+      "id": 339,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "板块资金",
       "signal_text": "园区开发 净流入2.7亿",
       "a_share_impact": "园区开发板块资金大幅流入，关注龙头",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 213,
-      "date": "2026-06-26",
+      "id": 340,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "板块资金",
       "signal_text": "装修装饰 净流入2.4亿",
       "a_share_impact": "装修装饰板块资金大幅流入，关注龙头",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 214,
-      "date": "2026-06-26",
+      "id": 341,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "板块资金",
       "signal_text": "机场 净流出1.0亿",
       "a_share_impact": "机场板块资金大幅流出，注意风险",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 215,
-      "date": "2026-06-26",
+      "id": 342,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "板块资金",
       "signal_text": "铁路 净流出1.1亿",
       "a_share_impact": "铁路板块资金大幅流出，注意风险",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 216,
-      "date": "2026-06-26",
+      "id": 343,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "板块资金",
       "signal_text": "酒店餐饮 净流出1.1亿",
       "a_share_impact": "酒店餐饮板块资金大幅流出，注意风险",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 217,
-      "date": "2026-06-26",
+      "id": 344,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "板块资金",
       "signal_text": "林业 净流出1.1亿",
       "a_share_impact": "林业板块资金大幅流出，注意风险",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 218,
-      "date": "2026-06-26",
+      "id": 345,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "板块资金",
       "signal_text": "商品城 净流出1.2亿",
       "a_share_impact": "商品城板块资金大幅流出，注意风险",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 219,
-      "date": "2026-06-26",
+      "id": 346,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "资金面",
       "signal_text": "北向资金净流入41.3亿",
       "a_share_impact": "外资加仓，提振市场信心",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 220,
-      "date": "2026-06-26",
+      "id": 347,
+      "date": "2026-06-27",
+      "period": "morning",
+      "category": "资金面",
+      "signal_text": "融资余额15131亿(SSE)",
+      "a_share_impact": "杠杆资金维持高位",
+      "confidence": "low",
+      "signal_time": "",
+      "created_at": "2026-06-27 04:33:17"
+    },
+    {
+      "id": 348,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "龙虎榜",
       "signal_text": "TCL中环(002129.SZ) 净买入11.4亿",
       "a_share_impact": "TCL中环获资金关注，连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 221,
-      "date": "2026-06-26",
+      "id": 349,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "龙虎榜",
       "signal_text": "广合科技(001389.SZ) 净买入7.4亿",
       "a_share_impact": "广合科技获资金关注，连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 222,
-      "date": "2026-06-26",
+      "id": 350,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "龙虎榜",
       "signal_text": "惠科股份(001399.SZ) 净买入4.2亿",
       "a_share_impact": "惠科股份获资金关注，无价格涨跌幅限制的证券",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 223,
-      "date": "2026-06-26",
+      "id": 351,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "龙虎榜",
       "signal_text": "太极实业(600667.SH) 净买入3.4亿",
       "a_share_impact": "太极实业获资金关注，有价格涨跌幅限制的日换手率达到20%的前五只证券",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 224,
-      "date": "2026-06-26",
+      "id": 352,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "龙虎榜",
       "signal_text": "宏昌电子(603002.SH) 净买入3.2亿",
       "a_share_impact": "宏昌电子获资金关注，有价格涨跌幅限制的日价格振幅达到15%的前五只证券",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 225,
-      "date": "2026-06-26",
+      "id": 353,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "财联社舆情",
-      "signal_text": "近24h电报20条，红色0条，海外3商品5宏观2个股1",
-      "a_share_impact": "舆情平稳",
+      "signal_text": "近24h电报123条，红色84条，海外17商品13宏观3个股43",
+      "a_share_impact": "舆情密度较高，注意消息面驱动",
       "confidence": "medium",
       "signal_time": "",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
     },
     {
-      "id": 226,
-      "date": "2026-06-26",
+      "id": 354,
+      "date": "2026-06-27",
+      "period": "morning",
+      "category": "跨市场映射",
+      "signal_text": "周六你需要知道的隔夜全球要闻：美军再次对伊朗发动打击；黎以美达成三方框架协议；纳指小幅收跌，存储股大幅回调，微软、苹果反",
+      "a_share_impact": "A股半导体/存储芯片板块承压",
+      "confidence": "high",
+      "signal_time": "22:30",
+      "created_at": "2026-06-27 04:33:17"
+    },
+    {
+      "id": 355,
+      "date": "2026-06-27",
+      "period": "morning",
+      "category": "跨市场映射",
+      "signal_text": "周六你需要知道的隔夜全球要闻：美军再次对伊朗发动打击；黎以美达成三方框架协议；纳指小幅收跌，存储股大幅回调，微软、苹果反",
+      "a_share_impact": "A股AI/算力板块情绪受压",
+      "confidence": "medium",
+      "signal_time": "22:30",
+      "created_at": "2026-06-27 04:33:17"
+    },
+    {
+      "id": 356,
+      "date": "2026-06-27",
+      "period": "morning",
+      "category": "跨市场映射",
+      "signal_text": "纳指收跌0.2% 芯片股下挫 西部数据大跌13%",
+      "a_share_impact": "A股半导体/存储芯片板块承压",
+      "confidence": "high",
+      "signal_time": "20:02",
+      "created_at": "2026-06-27 04:33:17"
+    },
+    {
+      "id": 357,
+      "date": "2026-06-27",
       "period": "morning",
       "category": "跨市场映射",
       "signal_text": "财联社6月26日电，据报道，在收到特朗普政府的电话通知后，OpenAI决定限制GPT 5.6的部署。",
       "a_share_impact": "A股AI/算力板块情绪受压",
       "confidence": "medium",
       "signal_time": "15:32",
-      "created_at": "2026-06-26 17:30:33"
+      "created_at": "2026-06-27 04:33:17"
+    },
+    {
+      "id": 358,
+      "date": "2026-06-27",
+      "period": "morning",
+      "category": "跨市场映射",
+      "signal_text": "费城半导体指数日内跌幅扩大至5%",
+      "a_share_impact": "A股半导体/存储芯片板块承压",
+      "confidence": "high",
+      "signal_time": "13:39",
+      "created_at": "2026-06-27 04:33:17"
+    },
+    {
+      "id": 359,
+      "date": "2026-06-27",
+      "period": "morning",
+      "category": "跨市场映射",
+      "signal_text": "美股光通信板块集体低开 Lumentum跌超7%",
+      "a_share_impact": "A股光模块/光通信板块承压",
+      "confidence": "medium",
+      "signal_time": "13:33",
+      "created_at": "2026-06-27 04:33:17"
+    },
+    {
+      "id": 360,
+      "date": "2026-06-27",
+      "period": "morning",
+      "category": "跨市场映射",
+      "signal_text": "美股三大指数集体低开 存储芯片概念走低",
+      "a_share_impact": "A股半导体/存储芯片板块承压",
+      "confidence": "high",
+      "signal_time": "13:30",
+      "created_at": "2026-06-27 04:33:17"
     }
   ],
   "gold_stocks": [
     {
       "code": "001389.SZ",
       "name": "广合科技",
+      "strategy": "两强命中",
+      "industry": "元器件",
+      "close": 220.88,
+      "pct_chg": 10.0,
+      "turnover": 12.87,
       "dragon_net_buy": 7.37,
       "dragon_reason": "连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
       "vip_count": 1,
       "dimensions": [
+        "钱三强",
         "龙虎榜",
         "研报"
       ],
-      "score": 35,
+      "score": 70,
+      "resonance": 3
+    },
+    {
+      "code": "002129.SZ",
+      "name": "TCL中环",
+      "strategy": "两强命中",
+      "industry": "电气设备",
+      "close": 11.19,
+      "pct_chg": 10.0295,
+      "turnover": 12.85,
+      "dragon_net_buy": 11.42,
+      "dragon_reason": "连续三个交易日内，涨幅偏离值累计达到20%的证券;日涨幅偏离值达到7%的前5只证券",
+      "dimensions": [
+        "钱三强",
+        "龙虎榜"
+      ],
+      "score": 60,
+      "resonance": 2
+    },
+    {
+      "code": "002119.SZ",
+      "name": "康强电子",
+      "strategy": "两强命中",
+      "industry": "半导体",
+      "close": 37.02,
+      "pct_chg": 10.0149,
+      "turnover": 23.14,
+      "dragon_net_buy": 1.64,
+      "dragon_reason": "日涨幅偏离值达到7%的前5只证券",
+      "dimensions": [
+        "钱三强",
+        "龙虎榜"
+      ],
+      "score": 60,
+      "resonance": 2
+    },
+    {
+      "code": "000901.SZ",
+      "name": "航天科技",
+      "strategy": "两强命中",
+      "industry": "汽车配件",
+      "close": 17.61,
+      "pct_chg": 0.8591,
+      "turnover": 3.61,
+      "vip_count": 1,
+      "dimensions": [
+        "钱三强",
+        "研报"
+      ],
+      "score": 45,
+      "resonance": 2
+    },
+    {
+      "code": "002137.SZ",
+      "name": "实益达",
+      "strategy": "两强命中",
+      "industry": "元器件",
+      "close": 11.02,
+      "pct_chg": 2.8945,
+      "turnover": 23.76,
+      "vip_count": 1,
+      "dimensions": [
+        "钱三强",
+        "研报"
+      ],
+      "score": 45,
       "resonance": 2
     }
   ],
   "prompt_file": "analysis_prompt.md",
-  "instructions": "请根据 analysis_prompt.md 的规则，结合 data/report_request.json 中的数据，撰写 2026-06-26 的晨报。要求：2500-4000字，结构完整，数据引用准确，洞见与金股逻辑清晰。写完后保存到 reports/2026-06-26_晨报.md"
+  "instructions": "请根据 analysis_prompt.md 的规则，结合 data/report_request.json 中的数据，撰写 2026-06-27 的晨报。要求：2500-4000字，结构完整，数据引用准确，洞见与金股逻辑清晰。写完后保存到 reports/2026-06-27_晨报.md"
 }

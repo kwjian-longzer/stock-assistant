@@ -1557,33 +1557,22 @@
   document.addEventListener('DOMContentLoaded', function () {
     initNavigation();
     updateMarketStatus();
-    // v4: 先检测 API，再决定数据源
-    detectAPI().then(function (apiOK) {
-      if (apiOK) {
-        // API 模式：从 API 服务获取实时数据
-        return fetchAPI('/api/dashboard?period=morning').then(function (data) {
-          appState.latestData = transformAPIData(data);
-          appState.manifest = FALLBACK_MANIFEST;
-          return Promise.all([loadHistory()]).then(function (h) {
-            appState.historyData = h[0];
-          });
-        }).catch(function () {
-          API_AVAILABLE = false;
-          return loadStaticData();
-        });
-      } else {
-        return loadStaticData();
-      }
-    }).then(function () {
+    // v4: 静态优先（GitHub Pages 可用）→ 异步检测 API（仅增强盘中刷新）
+    loadStaticData().then(function () {
       renderAllPages();
       updateLastUpdate();
       updateMarketStatus();
-      console.log('[App] 数据加载完成 (API=' + API_AVAILABLE + ')', {
+      console.log('[App] 静态数据加载完成', {
         manifest: !!appState.manifest,
         latest: !!appState.latestData
       });
-      // v4: 启动盘中自动刷新
-      startAutoRefresh();
+      // 异步检测 API（不阻塞渲染，仅用于盘中自动刷新增强）
+      detectAPI().then(function (apiOK) {
+        if (apiOK) {
+          console.log('[App] API 可用，启用盘中自动刷新增强');
+          startAutoRefresh();
+        }
+      });
     }).catch(function (e) {
       console.error('[App] 初始化失败', e);
       appState.manifest = FALLBACK_MANIFEST;

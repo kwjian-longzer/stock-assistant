@@ -890,9 +890,27 @@ def push_to_feishu(file_path):
     site_ok = False
     try:
         import site_builder
-        site_builder.main()
-        site_ok = True
-        print("[OK] 网站数据已生成")
+        # 从报告文件名解析日期和类型（如 2026-06-27_晨报.md → date=2026-06-27, type=morning）
+        import re as _re
+        fname = os.path.basename(file_path)
+        m = _re.match(r'(\d{4}-\d{2}-\d{2})_(.+?)\.md', fname)
+        if m:
+            date_str = m.group(1)
+            type_cn = m.group(2)
+            type_map = {"晨报": "morning", "午报": "noon", "晚报": "evening",
+                        "周六复盘": "weekly_sat", "周日展望": "weekly_sun"}
+            report_type = type_map.get(type_cn, "morning")
+            # 临时替换 sys.argv 以适配 site_builder.main() 的 argparse
+            old_argv = sys.argv
+            sys.argv = ["site_builder.py", "--date", date_str, "--type", report_type]
+            try:
+                site_builder.main()
+                site_ok = True
+                print("[OK] 网站数据已生成")
+            finally:
+                sys.argv = old_argv
+        else:
+            print(f"[WARN] 无法从文件名解析日期/类型: {fname}")
     except Exception as e:
         print(f"[WARN] 网站数据生成失败: {e}")
 
@@ -912,6 +930,10 @@ def push_to_feishu(file_path):
     # --- 汇总 ---
     print(f"\n{'='*60}")
     files_sent = []
+    # file_sent/qsq_sent/vip_sent 在步骤2中可能未定义（Webhook-only模式），默认为False
+    file_sent = locals().get('file_sent', False)
+    qsq_sent = locals().get('qsq_sent', False)
+    vip_sent = locals().get('vip_sent', False)
     if file_sent:
         files_sent.append("报告")
     if qsq_sent:
