@@ -1,0 +1,107 @@
+{
+  "_meta": {
+    "description": "因子权重演进表 — 由进化引擎自动维护，insight_engine读取此文件动态调整信号权重",
+    "version": 1,
+    "last_updated": "2026-06-27",
+    "last_updated_by": "evolution_engine",
+    "update_rule": "仅当回测验证改进幅度≥10%且统计显著(p<0.1)时更新"
+  },
+  "factors": {
+    "north_money": {
+      "weight": 15,
+      "description": "北向资金净流入/流出",
+      "hit_rate_history": [],
+      "last_adjusted": null,
+      "last_adjustment_reason": null
+    },
+    "us_market": {
+      "weight": 10,
+      "description": "美股涨跌对A股映射",
+      "hit_rate_history": [],
+      "last_adjusted": null,
+      "last_adjustment_reason": null
+    },
+    "hk_market": {
+      "weight": 8,
+      "description": "港股涨跌对A股映射",
+      "hit_rate_history": [],
+      "last_adjusted": null,
+      "last_adjustment_reason": null
+    },
+    "gold_price": {
+      "weight": 5,
+      "description": "黄金价格变动→避险情绪",
+      "hit_rate_history": [],
+      "last_adjusted": null,
+      "last_adjustment_reason": null
+    },
+    "oil_price": {
+      "weight": 5,
+      "description": "原油价格变动→通胀预期",
+      "hit_rate_history": [],
+      "last_adjusted": null,
+      "last_adjustment_reason": null
+    },
+    "sector_moneyflow": {
+      "weight": 12,
+      "description": "板块资金净流入Top5",
+      "hit_rate_history": [],
+      "last_adjusted": null,
+      "last_adjustment_reason": null
+    },
+    "dragon_tiger": {
+      "weight": 10,
+      "description": "龙虎榜机构净买入",
+      "hit_rate_history": [],
+      "last_adjusted": null,
+      "last_adjustment_reason": null
+    },
+    "limit_up": {
+      "weight": 8,
+      "description": "涨停板数量及板块分布",
+      "hit_rate_history": [],
+      "last_adjusted": null,
+      "last_adjustment_reason": null
+    },
+    "margin": {
+      "weight": 5,
+      "description": "融资融券余额变化",
+      "hit_rate_history": [],
+      "last_adjusted": null,
+      "last_adjustment_reason": null
+    },
+    "cls_telegraph": {
+      "weight": 10,
+      "description": "财联社红色电报信号",
+      "hit_rate_history": [],
+      "last_adjusted": null,
+      "last_adjustment_reason": null
+    },
+    "cross_market_map": {
+      "weight": 12,
+      "description": "跨市场映射(海外→A股板块传导)",
+      "hit_rate_history": [],
+      "last_adjusted": null,
+      "last_adjustment_reason": null
+    }
+  },
+  "combination_factors": {
+    "_description": "组合因子：当多个单因子同时触发时，额外加权（L3逻辑迭代产物）",
+    "north_plus_limit_up": {
+      "condition": "north_money>=50亿 AND limit_up_count>=30",
+      "extra_weight": 15,
+      "description": "北向大幅流入+涨停板密集→强势市场信号叠加",
+      "hit_rate_history": [],
+      "created_date": null,
+      "status": "proposed"
+    },
+    "north_out_plus_margin_down": {
+      "condition": "north_money<=-50亿 AND margin_balance_decreasing",
+      "extra_weight": 10,
+      "description": "北向大幅流出+融资余额下降→弱势市场信号叠加",
+      "hit_rate_history": [],
+      "created_date": null,
+      "status": "proposed"
+    }
+  }
+}

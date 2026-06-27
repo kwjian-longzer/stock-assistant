@@ -1,0 +1,74 @@
+{
+  "_meta": {
+    "description": "预判准确率基线 — 进化引擎每次部署新规则后更新此基线，作为下次比较的基准",
+    "version": 1,
+    "last_updated": "2026-06-27",
+    "last_updated_by": "evolution_engine"
+  },
+  "overall": {
+    "total_predictions": 0,
+    "total_hits": 0,
+    "hit_rate": 0.0,
+    "baseline_date": "2026-06-27",
+    "baseline_description": "进化引擎于 2026-06-27 更新基线"
+  },
+  "by_factor": {},
+  "by_confidence": {
+    "high": {
+      "total": 0,
+      "hits": 0,
+      "rate": 0.0
+    },
+    "medium": {
+      "total": 0,
+      "hits": 0,
+      "rate": 0.0
+    },
+    "low": {
+      "total": 0,
+      "hits": 0,
+      "rate": 0.0
+    }
+  },
+  "by_market_regime": {
+    "bull": {
+      "total": 0,
+      "hits": 0,
+      "rate": 0.0
+    },
+    "bear": {
+      "total": 0,
+      "hits": 0,
+      "rate": 0.0
+    },
+    "sideways": {
+      "total": 0,
+      "hits": 0,
+      "rate": 0.0
+    }
+  },
+  "history": [
+    {
+      "date": "2026-06-27",
+      "event": "baseline_initialized",
+      "overall_rate": 0.0,
+      "note": "进化引擎初始化基线，无历史验证数据"
+    },
+    {
+      "date": "2026-06-27",
+      "event": "benchmark_updated",
+      "overall_rate": 0.0,
+      "sample_size": 0,
+      "market_regime": "sideways",
+      "failure_patterns": 0
+    },
+    {
+      "date": "2026-06-27",
+      "event": "benchmark_updated",
+      "overall_rate": 0.0,
+      "sample_size": 0,
+      "market_regime": "sideways",
+      "failure_patterns": 0
+    }
+  ]
+}

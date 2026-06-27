@@ -537,19 +537,22 @@ def run(db, date_str=None):
       1. verify_predictions  盘后预判验证
       2. solidify_experience 经验固化
       3. gold_stock_backtest.run_backtest(days_filter=20)  金股回测（try/except 包裹）
+      4. evolution_engine.run   进化引擎（诊断→假设→实验→验证→部署）
+      5. external_learner.run   外部学习器（盘后复盘→信号盲区→外部观点→模式发现）
+      6. knowledge_persistor    知识固化（写回knowledge/→git push）
 
     Args:
         db: DB 实例
         date_str: 验证日期 YYYY-MM-DD，默认今天
 
     Returns:
-        dict: {"verified": int, "lessons": int}
+        dict: {"verified": int, "lessons": int, "evolution": dict, "external": dict}
     """
     if date_str is None:
         date_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
     print("=" * 60)
-    print(f"v4.0 学习闭环 启动 @ {date_str}")
+    print(f"v4.0 学习闭环（含进化引擎）启动 @ {date_str}")
     print(f"时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
@@ -568,12 +571,46 @@ def run(db, date_str=None):
         # 回测依赖 Tushare / 历史文件，失败不影响学习闭环主流程
         print(f"  [警告] 金股回测失败，已跳过: {e}")
 
+    # 4. 进化引擎（诊断→假设→实验→验证→部署）
+    evolution_result = {"deployed": 0, "hypotheses": 0}
+    print("\n=== 进化引擎 ===")
+    try:
+        from evolution.engine import run as run_evolution
+        evolution_result = run_evolution(db, date_str)
+    except Exception as e:
+        print(f"  [警告] 进化引擎失败，已跳过: {e}")
+
+    # 5. 外部学习器（盘后复盘→信号盲区→外部观点→模式发现）
+    external_result = {}
+    print("\n=== 外部学习器 ===")
+    try:
+        from evolution.external_learner import run as run_external
+        external_result = run_external(db, date_str)
+    except Exception as e:
+        print(f"  [警告] 外部学习器失败，已跳过: {e}")
+
+    # 6. 知识固化（写回knowledge/→git push）
+    print("\n=== 知识固化 ===")
+    try:
+        from evolution.knowledge_persistor import persist_and_push
+        persist_result = persist_and_push(
+            evolution_result, external_result, date_str, auto_push=True
+        )
+    except Exception as e:
+        print(f"  [警告] 知识固化失败，已跳过: {e}")
+
     print("\n" + "=" * 60)
-    print("学习闭环 完成")
+    print("学习闭环（含进化引擎）完成")
     print(f"  预判验证: {n_verified} 条")
     print(f"  经验固化: {n_lessons} 条")
+    print(f"  进化引擎: {evolution_result.get('hypotheses', 0)} 假设, {evolution_result.get('deployed', 0)} 部署")
     print("=" * 60)
-    return {"verified": n_verified, "lessons": n_lessons}
+    return {
+        "verified": n_verified,
+        "lessons": n_lessons,
+        "evolution": evolution_result,
+        "external": external_result,
+    }
 
 
 # ---------------------------------------------------------------------------
