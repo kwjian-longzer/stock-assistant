@@ -388,11 +388,34 @@ def search_cls_telegraph(clues, db_path=None):
 
 
 # ----- 数据源4: fxbaogao研报+调研纪要 -----
+# 支持两种模式：
+#   1. MCP模式（推荐）：Agent通过run_mcp调用mcp_fxbaogao，将结果传入mcp_fxbaogao_results
+#   2. HTTP降级模式：脚本独立运行时通过HTTP API直接调用
 
-def search_fxbaogao_reports(company_name):
-    """搜索fxbaogao研报和调研纪要"""
+def search_fxbaogao_reports(company_name, mcp_results=None):
+    """搜索fxbaogao研报和调研纪要
+
+    Args:
+        company_name: 公司名称
+        mcp_results: Agent通过run_mcp调用mcp_fxbaogao的search_reports工具返回的结果
+            格式: [{"reportId": 123, "title": "...", "orgName": "...",
+                    "pubTimeStr": "...", "paragraphs": [...]}, ...]
+            如果传入此参数，将跳过HTTP API调用
+
+    Agent调用示例:
+      # Agent在主流程中通过run_mcp调用
+      run_mcp("mcp_fxbaogao", "search_reports", {"keywords": "有研粉材"})
+      # 将返回结果传入
+      discover_stocks_v4(title, brief, mcp_fxbaogao_results=results)
+    """
+    # MCP模式：使用Agent传入的结果
+    if mcp_results is not None:
+        return _parse_fxbaogao_mcp_results(mcp_results)
+
+    # HTTP降级模式：直接调用API
     api_key = get_fxbaogao_api_key()
     if not api_key:
+        print(f"    [fxbaogao] 无API key，跳过（建议使用MCP模式）")
         return []
 
     url = "https://api.fxbaogao.com/mcp/"
@@ -428,32 +451,51 @@ def search_fxbaogao_reports(company_name):
 
         reports_data = json.loads(reports_text)
         reports = reports_data if isinstance(reports_data, list) else reports_data.get("reports", [])
-
-        categorized = []
-        for report in reports[:10]:
-            title = re.sub(r'</?em>', '', report.get("title", ""))
-            report_type = "fxbaogao_report"
-            if "调研" in title or "纪要" in title or "问答" in title:
-                report_type = "fxbaogao_ir"
-
-            categorized.append({
-                "source": report_type,
-                "report_id": report.get("reportId"),
-                "title": title,
-                "content": title,
-                "org": report.get("orgName", ""),
-                "pub_time": report.get("pubTimeStr", ""),
-                "paragraphs": report.get("paragraphs", []),
-            })
-
-        return categorized
+        return _parse_fxbaogao_mcp_results(reports)
     except Exception as e:
-        print(f"    [fxbaogao] 搜索失败: {e}")
+        print(f"    [fxbaogao] HTTP搜索失败: {e}")
         return []
 
 
-def get_fxbaogao_paragraphs(report_id, keyword):
-    """获取研报正文命中段落"""
+def _parse_fxbaogao_mcp_results(reports):
+    """解析fxbaogao搜索结果（MCP和HTTP共用）"""
+    if not isinstance(reports, list):
+        return []
+
+    categorized = []
+    for report in reports[:10]:
+        title = re.sub(r'</?em>', '', report.get("title", ""))
+        report_type = "fxbaogao_report"
+        if "调研" in title or "纪要" in title or "问答" in title:
+            report_type = "fxbaogao_ir"
+
+        categorized.append({
+            "source": report_type,
+            "report_id": report.get("reportId"),
+            "title": title,
+            "content": title,
+            "org": report.get("orgName", ""),
+            "pub_time": report.get("pubTimeStr", ""),
+            "paragraphs": report.get("paragraphs", []),
+        })
+
+    return categorized
+
+
+def get_fxbaogao_paragraphs(report_id, keyword, mcp_paragraphs=None):
+    """获取研报正文命中段落
+
+    Args:
+        report_id: 研报ID
+        keyword: 搜索关键词
+        mcp_paragraphs: Agent通过run_mcp调用mcp_fxbaogao的get_paragraphs工具返回的结果
+            如果传入此参数，将跳过HTTP API调用
+    """
+    # MCP模式
+    if mcp_paragraphs is not None:
+        return mcp_paragraphs if isinstance(mcp_paragraphs, list) else []
+
+    # HTTP降级模式
     api_key = get_fxbaogao_api_key()
     if not api_key or not report_id:
         return []
@@ -725,22 +767,32 @@ def check_exclusion_v4(stock_name, clue_verification, parsed_article):
 # ========== 主函数 ==========
 
 def discover_stocks_v4(title, brief="", market_filter="",
-                       web_search_results=None):
+                       web_search_results=None, mcp_fxbaogao_results=None,
+                       mcp_tushare_stock_db=None):
     """v4股票发现完整流程
 
-    新增参数:
-        web_search_results: Agent通过WebSearch工具搜索的结果列表
+    MCP集成参数（Agent调用时传入，优先于HTTP API）:
+        web_search_results: WebSearch工具搜索结果
             格式: [{"title": "...", "snippet": "...", "url": "..."}, ...]
-            或直接字符串列表
+        mcp_fxbaogao_results: mcp_fxbaogao的search_reports结果
+            格式: {"公司名": [研报列表], ...}
+            或单个公司的研报列表 [{"reportId": ..., "title": ...}, ...]
+        mcp_tushare_stock_db: mcp_tushareMcp获取的股票数据库
+            格式: [{"ts_code": "...", "name": "...", "main_business": "...", ...}, ...]
+            如果传入，将跳过tushare Python库调用
+
+    数据源优先级:
+        1. MCP传入结果（Agent模式，推荐）
+        2. HTTP API直接调用（独立运行模式，降级）
 
     流程:
     1. 解析VIP文章 → 结构化信号
-    2. Tushare初筛候选股票
+    2. Tushare初筛候选股票（MCP或Python库）
     3. 对每个候选，多源搜索：
-       a. 东方财富公告API（自动）
+       a. 东方财富公告API（自动，无MCP）
        b. WebSearch结果（Agent传入）
-       c. fxbaogao研报+调研纪要（自动）
-       d. CLS电报（自动）
+       c. fxbaogao研报+调研纪要（MCP或HTTP）
+       d. CLS电报（本地DB）
     4. 加权线索验证
     5. 排除逻辑 + 排序
     """
@@ -763,11 +815,15 @@ def discover_stocks_v4(title, brief="", market_filter="",
 
     clues = parsed["business_clues"]
 
-    # Step 2: Tushare初筛候选
-    from vip_extractor import load_stock_database
-    stock_db = load_stock_database()
+    # Step 2: Tushare初筛候选（MCP优先，Python库降级）
+    if mcp_tushare_stock_db:
+        stock_db = mcp_tushare_stock_db
+        print(f"\n[Step 2] Tushare MCP数据: {len(stock_db)} 只股票")
+    else:
+        from vip_extractor import load_stock_database
+        stock_db = load_stock_database()
     candidates = discover_candidates(parsed, stock_db)
-    print(f"\n[Step 2] Tushare初筛: {len(candidates)} 只候选")
+    print(f"  初筛: {len(candidates)} 只候选")
     for stock, score in candidates[:10]:
         print(f"  {stock.get('name'):10s} {stock.get('ts_code'):12s} 初筛分={score}")
 
@@ -797,11 +853,20 @@ def discover_stocks_v4(title, brief="", market_filter="",
         if company_web_results:
             print(f"    WebSearch匹配: {len(company_web_results)} 条")
 
-        # 3c: fxbaogao研报搜索
-        fxbaogao_results = search_fxbaogao_reports(name)
+        # 3c: fxbaogao研报搜索（MCP优先，HTTP降级）
+        # 如果Agent传入了按公司名索引的MCP结果，直接使用
+        company_fxbaogao_mcp = None
+        if mcp_fxbaogao_results:
+            if isinstance(mcp_fxbaogao_results, dict):
+                company_fxbaogao_mcp = mcp_fxbaogao_results.get(name)
+            elif isinstance(mcp_fxbaogao_results, list):
+                company_fxbaogao_mcp = mcp_fxbaogao_results
+
+        fxbaogao_results = search_fxbaogao_reports(name, mcp_results=company_fxbaogao_mcp)
         fxbaogao_ir = [r for r in fxbaogao_results if r["source"] == "fxbaogao_ir"]
         fxbaogao_reports = [r for r in fxbaogao_results if r["source"] == "fxbaogao_report"]
-        print(f"    fxbaogao: {len(fxbaogao_ir)} 篇调研纪要, {len(fxbaogao_reports)} 篇研报")
+        mcp_mode = "MCP" if company_fxbaogao_mcp is not None else "HTTP"
+        print(f"    fxbaogao({mcp_mode}): {len(fxbaogao_ir)} 篇调研纪要, {len(fxbaogao_reports)} 篇研报")
 
         # 获取更多段落
         all_fxbaogao = fxbaogao_ir + fxbaogao_reports

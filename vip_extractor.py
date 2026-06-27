@@ -654,7 +654,8 @@ if __name__ == "__main__":
 # v4发现引擎作为独立模块 vip_search_v4.py 存在
 # 以下函数提供向后兼容的调用入口
 
-def discover_stocks_v4(title, brief="", related_stock="", web_search_results=None):
+def discover_stocks_v4(title, brief="", related_stock="", web_search_results=None,
+                        mcp_fxbaogao_results=None, mcp_tushare_stock_db=None):
     """v4多源动态搜索入口
 
     v3的discover_stocks_by_article()仅用Tushare主营业务+fxbaogao研报搜索
@@ -664,20 +665,31 @@ def discover_stocks_v4(title, brief="", related_stock="", web_search_results=Non
       - 加权线索验证（多源交叉验证加分）
       - 排除逻辑（仅匹配通用概念的标的被排除）
 
+    MCP集成参数（Agent调用时传入，优先于HTTP API）：
+      web_search_results: WebSearch工具搜索结果
+      mcp_fxbaogao_results: mcp_fxbaogao的search_reports结果
+      mcp_tushare_stock_db: mcp_tushareMcp获取的股票数据库
+
     用法：
-      # 独立运行（不调用WebSearch）
+      # 独立运行（HTTP降级模式）
       from vip_extractor import discover_stocks_v4
       kept, excl = discover_stocks_v4(title, brief)
 
-      # Agent集成模式（传入WebSearch结果）
-      web_results = [...]  # Agent通过WebSearch工具获取
-      kept, excl = discover_stocks_v4(title, brief, web_search_results=web_results)
+      # Agent集成模式（MCP优先）
+      # Agent先通过run_mcp调用获取数据，再传入
+      web_results = WebSearch("有研粉材 互动易 PCB镀铜")
+      fxbaogao_data = run_mcp("mcp_fxbaogao", "search_reports", {"keywords": "有研粉材"})
+      kept, excl = discover_stocks_v4(title, brief,
+          web_search_results=web_results,
+          mcp_fxbaogao_results=fxbaogao_data)
 
     详细实现见 vip_search_v4.py
     """
     try:
         from vip_search_v4 import discover_stocks_v4 as _discover_v4
-        return _discover_v4(title, brief, web_search_results=web_search_results)
+        return _discover_v4(title, brief, web_search_results=web_search_results,
+                            mcp_fxbaogao_results=mcp_fxbaogao_results,
+                            mcp_tushare_stock_db=mcp_tushare_stock_db)
     except ImportError as e:
         print(f"[WARN] vip_search_v4模块未安装，回退到v3: {e}")
         return discover_stocks_by_article(title, brief, related_stock, [])
