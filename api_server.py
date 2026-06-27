@@ -381,7 +381,10 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         """简化日志输出"""
-        print(f"  [{self.command}] {args[0]} → {args[1]}")
+        # Bug#12修复: 防止 args 长度不足时 IndexError
+        path = args[0] if len(args) > 0 else "?"
+        code = args[1] if len(args) > 1 else "?"
+        print(f"  [{self.command}] {path} → {code}")
 
 
 # ---------------------------------------------------------------------------

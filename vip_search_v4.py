@@ -761,6 +761,11 @@ def check_exclusion_v4(stock_name, clue_verification, parsed_article):
             if re.search(r'\.{5,}|图\d+|表\d+', ev):
                 r["score"] = max(0, r["score"] - 2)
 
+    # Bug#4修复: 证据质量惩罚后重新计算 total_score，确保排序使用真实分数
+    clue_verification["total_score"] = sum(
+        r["score"] for r in clue_verification["clue_results"] if r["matched"]
+    )
+
     return False, ""
 
 

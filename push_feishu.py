@@ -886,33 +886,10 @@ def push_to_feishu(file_path):
     webhook_sent = send_summary_via_webhook(file_path)
 
     # --- 步骤3: v3.0 网站数据生成 ---
-    print(f"\n[步骤3] 生成网站数据...")
-    site_ok = False
-    try:
-        import site_builder
-        # 从报告文件名解析日期和类型（如 2026-06-27_晨报.md → date=2026-06-27, type=morning）
-        import re as _re
-        fname = os.path.basename(file_path)
-        m = _re.match(r'(\d{4}-\d{2}-\d{2})_(.+?)\.md', fname)
-        if m:
-            date_str = m.group(1)
-            type_cn = m.group(2)
-            type_map = {"晨报": "morning", "午报": "noon", "晚报": "evening",
-                        "周六复盘": "weekly_sat", "周日展望": "weekly_sun"}
-            report_type = type_map.get(type_cn, "morning")
-            # 临时替换 sys.argv 以适配 site_builder.main() 的 argparse
-            old_argv = sys.argv
-            sys.argv = ["site_builder.py", "--date", date_str, "--type", report_type]
-            try:
-                site_builder.main()
-                site_ok = True
-                print("[OK] 网站数据已生成")
-            finally:
-                sys.argv = old_argv
-        else:
-            print(f"[WARN] 无法从文件名解析日期/类型: {fname}")
-    except Exception as e:
-        print(f"[WARN] 网站数据生成失败: {e}")
+    # Bug#9修复: report_generator.finalize() 已在步骤4调用过 site_builder，
+    # 此处不再重复调用，避免双重构建和潜在的数据竞争
+    print(f"\n[步骤3] 网站数据已由 report_generator 生成，跳过")
+    site_ok = True
 
     # --- 步骤4: v3.0 金股回测 ---
     if site_ok:

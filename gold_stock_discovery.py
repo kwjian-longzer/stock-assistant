@@ -177,10 +177,32 @@ def discover(db, date_str=None, top_n=5):
         print(f"    {i}. {g.get('name','')}({g['code']}) 评分{g['score']} "
               f"共振{g['resonance']}/5 [{','.join(g['dimensions'])}]")
 
-    # 保存 JSON 供报告引用
+    # Bug#10修复: 保存enriched item（含buy_range/target_price/stop_loss）而非原始candidate
+    enriched_gold = []
+    for g in gold:
+        close = g.get("close")
+        item = {
+            "name": g.get("name", ""),
+            "code": g["code"],
+            "recommend_date": date_str,
+            "score": g["score"],
+            "resonance": g.get("resonance", 0),
+            "dimensions": g.get("dimensions", []),
+            "reason": "、".join(g.get("dimensions", [])),
+            "buy_range": "",
+            "target_price": "",
+            "stop_loss": "",
+            "strength": "重点关注" if g["score"] >= 50 else "关注",
+        }
+        if close:
+            item["buy_range"] = f"{close*0.98:.2f}-{close*1.02:.2f}"
+            item["target_price"] = f"{close*1.10:.2f}"
+            item["stop_loss"] = f"{close*0.93:.2f}"
+        enriched_gold.append(item)
+
     os.makedirs("data", exist_ok=True)
     with open("data/gold_stocks.json", "w", encoding="utf-8") as f:
-        json.dump({"date": date_str, "gold_stocks": gold, "total_candidates": len(candidates)},
+        json.dump({"date": date_str, "gold_stocks": enriched_gold, "total_candidates": len(candidates)},
                   f, ensure_ascii=False, indent=2, default=str)
     return gold
 

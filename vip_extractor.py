@@ -687,7 +687,9 @@ def discover_stocks_v4(title, brief="", related_stock="", web_search_results=Non
     """
     try:
         from vip_search_v4 import discover_stocks_v4 as _discover_v4
-        return _discover_v4(title, brief, web_search_results=web_search_results,
+        # Bug#5修复: 传递 related_stock 作为 market_filter，使v4能按板块约束过滤
+        return _discover_v4(title, brief, market_filter=related_stock,
+                            web_search_results=web_search_results,
                             mcp_fxbaogao_results=mcp_fxbaogao_results,
                             mcp_tushare_stock_db=mcp_tushare_stock_db)
     except ImportError as e:

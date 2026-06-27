@@ -634,7 +634,10 @@ def collect_vip_articles(db: DB) -> dict:
 
 
 def discover_stocks_for_article(article: dict, db: DB) -> list:
-    """两层股票发现：Tushare主营业务 + 发现报告API
+    """v4多源股票发现（Bug#1修复：接入v4引擎替代v3）
+
+    优先使用 vip_search_v4 的多源动态搜索（东财公告+WebSearch+fxbaogao+CLS电报），
+    降级时回退到v3的Tushare主营业务+fxbaogao两层搜索。
 
     Args:
         article: VIP文章dict
@@ -647,6 +650,33 @@ def discover_stocks_for_article(article: dict, db: DB) -> list:
     brief = article.get('brief', '')
     related_stock = article.get('related_stock', '')
 
+    # Bug#1修复: 优先使用v4多源搜索
+    try:
+        from vip_search_v4 import discover_stocks_v4
+        kept, excluded = discover_stocks_v4(
+            title, brief, market_filter=related_stock
+        )
+        results = []
+        for r in kept:
+            sources = r.get('source_counts', {})
+            source_str = "+".join(k for k, v in sources.items() if v > 0) or "v4_multi"
+            results.append({
+                'name': r.get('stock_name', ''),
+                'code': r.get('stock_code', ''),
+                'industry': r.get('industry', ''),
+                'score': r.get('total_score', 0),
+                'source': source_str,
+                'detail': f"匹配率{r.get('match_rate',0):.0%}, 线索: {', '.join(r.get('matched_clues', [])[:3])}",
+            })
+        if results:
+            return results[:10]
+        print("  [v4] 无结果，回退到v3搜索")
+    except ImportError:
+        print("  [WARN] vip_search_v4未安装，使用v3搜索")
+    except Exception as e:
+        print(f"  [v4异常] {e}，回退到v3搜索")
+
+    # v3降级：Tushare主营业务 + 发现报告API
     results = []
 
     # 第一层: Tushare主营业务搜索（通过缓存的股票数据库）

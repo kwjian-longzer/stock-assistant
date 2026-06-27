@@ -208,9 +208,12 @@ def finalize(report_path, date_str, period):
         summary_path = os.path.join(base, "data", "data_summary.json")
         result = validate(report_path, summary_path)
         if isinstance(result, dict):
-            print(f"  校验结果: {result.get('status', 'unknown')}")
-            if not result.get("pass", True):
-                print(f"  [警告] 校验未完全通过: {result.get('issues', [])[:3]}")
+            status = "通过" if result.get("valid", False) else "未通过"
+            print(f"  校验结果: {status}")
+            if not result.get("valid", False):
+                print(f"  [警告] 校验未通过: {result.get('errors', [])[:3]}")
+            if result.get("warnings"):
+                print(f"  [提示] 校验警告: {result['warnings'][:3]}")
     except Exception as e:
         print(f"  [跳过] 校验模块异常: {e}")
 

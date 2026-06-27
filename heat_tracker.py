@@ -166,8 +166,15 @@ def fetch_limit_up_stocks(pro, trade_date, stock_basic_list):
     try:
         df = pro.daily(trade_date=trade_date, fields='ts_code,trade_date,pct_chg')
         if df is not None and len(df) > 0:
-            # 涨停判断: 主板>=9.8%, 科创板/创业板>=19.5%
-            limit_up = df[(df['pct_chg'] >= 9.8) | (df['pct_chg'] >= 19.5)]
+            # Bug#6修复: 涨停判断需按板块区分阈值
+            # 主板(60/00开头)>=9.8%, 科创板(688)/创业板(300)>=19.5%
+            def _is_limit_up(row):
+                pct = row.get('pct_chg', 0)
+                code = str(row.get('ts_code', ''))
+                if code.startswith(('300', '688')):
+                    return pct >= 19.5
+                return pct >= 9.8
+            limit_up = df[df.apply(_is_limit_up, axis=1)]
             for _, row in limit_up.iterrows():
                 ts_code = row.get('ts_code', '')
                 industry = industry_map.get(ts_code, '其他')
