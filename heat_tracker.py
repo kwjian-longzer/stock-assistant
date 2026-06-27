@@ -747,4 +747,35 @@ def export_heat_data_json(output_path=None, pro=None, stock_basic_list=None, sec
         json.dump(export_data, f, ensure_ascii=False, indent=2)
 
     print(f"[OK] 热度数据已导出: {output_path}")
+
+    # v5: 写入DB（补全缺失的DB写入）
+    try:
+        from db import DB
+        db = DB()
+        write_heat_to_db(db, export_data)
+    except Exception as e:
+        print(f"[WARN] 热度数据写入DB失败: {e}")
     return export_data
+
+
+def write_heat_to_db(db, heat_data):
+    """将热度数据写入 heat_tracking DB表（补全缺失的DB写入）"""
+    items = []
+    for sec in heat_data.get("sectors", []):
+        lifecycle = sec.get("lifecycle", {})
+        lifecycle_state = lifecycle.get("state", "") if isinstance(lifecycle, dict) else str(lifecycle)
+        for i, trade_date in enumerate(heat_data.get("trade_dates", [])):
+            # trade_date格式: "20260528" → 转为 "2026-05-28"
+            date_str = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}" if len(trade_date) == 8 else trade_date
+            items.append({
+                "date": date_str,
+                "sector": sec.get("name", ""),
+                "heat_score": sec.get("heat_series", [0]*20)[i] if i < len(sec.get("heat_series", [])) else 0,
+                "capital_flow": sec.get("capital_series", [0]*20)[i] if i < len(sec.get("capital_series", [])) else 0,
+                "limit_up_count": sec.get("limit_series", [0]*20)[i] if i < len(sec.get("limit_series", [])) else 0,
+                "lifecycle": lifecycle_state,
+            })
+    if items:
+        n = db.upsert_heat_tracking(items)
+        print(f"[OK] 热度数据写入DB: {n} 条记录")
+    return len(items)

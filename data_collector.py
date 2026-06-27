@@ -54,6 +54,27 @@ def safe_float(v, default=None):
         return default
 
 
+def _safe_float(v, default=None):
+    try:
+        return float(v) if v not in (None, "", "0.000") else default
+    except (ValueError, TypeError):
+        return default
+
+
+def _ensure_tushare():
+    try:
+        import tushare as ts
+        return ts
+    except ImportError:
+        import subprocess
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "tushare", "--break-system-packages", "-q"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        import tushare as ts
+        return ts
+
+
 def parse_sina_hq(text):
     """解析新浪行情字符串 hq_str_xxx="字段1,字段2,..."  → (name, fields_list)"""
     if not text or "=" not in text:
@@ -414,6 +435,46 @@ def collect_qian_sanqiang(db, date_str):
         return 0
 
 
+def collect_moneyflow(db, date_str):
+    """个股资金流向采集，写入 moneyflow 表（v5新增维度）"""
+    trade_date_yyyymmdd = date_str.replace("-", "")
+    ts = _ensure_tushare()
+    ts.set_token(get_tushare_token())
+    pro = ts.pro_api()
+
+    try:
+        df = pro.moneyflow(trade_date=trade_date_yyyymmdd, limit=4000)
+        if df is None or len(df) == 0:
+            print(f"  [主力资金] 无数据 ({date_str})")
+            return 0
+        items = []
+        for _, r in df.iterrows():
+            items.append({
+                "trade_date": date_str,
+                "ts_code": r.get("ts_code", ""),
+                "name": "",  # moneyflow不返回name，后续可从stock_basic补
+                "pct_chg": _safe_float(r.get("pct_chg")),
+                "close": _safe_float(r.get("close")),
+                "net_mf_amount": _safe_float(r.get("net_mf_amount")),
+                "buy_sm_amount": _safe_float(r.get("buy_sm_amount")),
+                "sell_sm_amount": _safe_float(r.get("sell_sm_amount")),
+                "buy_md_amount": _safe_float(r.get("buy_md_amount")),
+                "sell_md_amount": _safe_float(r.get("sell_md_amount")),
+                "buy_lg_amount": _safe_float(r.get("buy_lg_amount")),
+                "sell_lg_amount": _safe_float(r.get("sell_lg_amount")),
+                "buy_elg_amount": _safe_float(r.get("buy_elg_amount")),
+                "sell_elg_amount": _safe_float(r.get("sell_elg_amount")),
+                "net_lg_amount": _safe_float(r.get("net_lg_amount")),
+                "net_elg_amount": _safe_float(r.get("net_elg_amount")),
+            })
+        n = db.upsert_moneyflow(items)
+        print(f"  [主力资金] 写入 {n} 条 ({date_str})")
+        return n
+    except Exception as e:
+        print(f"  [主力资金] 失败: {e}")
+        return 0
+
+
 def collect_calendar(db):
     """财经日历事件，写入 calendar_event（T1.6）
     尝试东方财富财经日历 API，失败则降级。"""
@@ -483,7 +544,7 @@ def collect_noon(db, date_str=None):
 
 
 def collect_evening(db, date_str=None):
-    """盘后采集（15:30）：A股收盘 + 涨停池 + 龙虎榜 + 融资融券 + 板块资金 + 北向"""
+    """盘后采集（15:30）：A股收盘 + 涨停池 + 龙虎榜 + 融资融券 + 板块资金 + 北向 + 主力资金"""
     if date_str is None:
         date_str = datetime.datetime.now().strftime("%Y-%m-%d")
     print(f"\n=== 盘后采集 {date_str} ===")
@@ -495,16 +556,17 @@ def collect_evening(db, date_str=None):
     collect_margin(db, date_str, trade_date)
     collect_sector_moneyflow(db, date_str, trade_date)
     collect_north_money(db, date_str, trade_date)
+    collect_moneyflow(db, date_str)
     print("--- 盘后采集完成 ---")
 
 
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="v4.0 数据采集器")
+    parser = argparse.ArgumentParser(description="v5.0 数据采集器")
     parser.add_argument("--period", required=True,
                         choices=["morning", "noon", "evening", "qian_sanqiang",
-                                 "calendar", "all"],
+                                 "moneyflow", "calendar", "all"],
                         help="采集时段")
     parser.add_argument("--date", default=None, help="日期 YYYY-MM-DD（默认今天）")
     args = parser.parse_args()
@@ -522,12 +584,16 @@ def main():
         collect_evening(db, date_str)
     elif args.period == "qian_sanqiang":
         collect_qian_sanqiang(db, date_str)
+    elif args.period == "moneyflow":
+        collect_moneyflow(db, date_str)
     elif args.period == "calendar":
         collect_calendar(db)
     elif args.period == "all":
         collect_morning(db, date_str)
         collect_noon(db, date_str)
         collect_evening(db, date_str)
+        collect_qian_sanqiang(db, date_str)
+        collect_moneyflow(db, date_str)
         collect_calendar(db)
 
     stats = db.get_stats()

@@ -578,3 +578,127 @@ body {
   .search-box input { width: 140px; }
   .cal-month-grid .cal-cell { min-height: 54px; font-size: 11px; }
 }
+
+/* ===================================================================
+   v5 首页三栏布局 (观澜洞见 / 闲看潮涌 / 踏浪分金)
+   注意: .section-title 已在通用样式中定义(display:flex)，这里用
+   .section-block 作用域隔离，避免影响其他页面的 section-title。
+   =================================================================== */
+.section-block {
+  background: var(--bg-card, #1a1a2e);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  border: 1px solid var(--border, #2a2a4a);
+}
+.section-block .section-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 15px 0;
+  padding-left: 10px;
+  border-left: 4px solid var(--accent, #00f0ff);
+  display: block;
+  color: var(--text-primary, #ddd);
+}
+.guanlan-insights .section-title { border-left-color: #00f0ff; }
+.xiankan-chao .section-title { border-left-color: #ff9500; }
+.talang-fenjin .section-title { border-left-color: #ffd700; }
+
+.insight-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+.insight-tab {
+  padding: 6px 16px;
+  border: 1px solid var(--border, #2a2a4a);
+  background: transparent;
+  color: var(--text-muted, #888);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+.insight-tab:hover { color: var(--text-primary, #ddd); border-color: var(--text-secondary, #555); }
+.insight-tab.active {
+  background: var(--accent, #00f0ff);
+  color: #000;
+  border-color: var(--accent, #00f0ff);
+}
+.insights-content {
+  min-height: 120px;
+  line-height: 1.8;
+  color: var(--text-secondary, #ddd);
+}
+.insight-item {
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border, #2a2a4a);
+}
+.insight-item:last-child { border-bottom: none; }
+.insight-category {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-right: 8px;
+}
+.insight-cat-high { background: rgba(255,50,50,0.2); color: #ff6464; }
+.insight-cat-medium { background: rgba(255,165,0,0.2); color: #ffa500; }
+.insight-cat-low { background: rgba(100,100,100,0.2); color: #888; }
+
+.market-dashboard { display: flex; flex-direction: column; gap: 15px; }
+.market-row { display: flex; gap: 15px; }
+.market-col { flex: 1; min-width: 0; }
+.market-half { flex: 1; min-width: 0; }
+.market-col h3, .market-half h3 {
+  font-size: 14px; color: var(--text-muted, #888); margin: 0 0 8px 0; font-weight: 600;
+}
+.market-data { font-size: 13px; line-height: 1.8; }
+.market-item {
+  display: flex; justify-content: space-between;
+  padding: 3px 0;
+}
+.market-item .name { color: var(--text-secondary, #aaa); }
+.market-item .val { font-variant-numeric: tabular-nums; }
+.market-item .val.up { color: var(--up, #ff4d4f); }
+.market-item .val.down { color: var(--down, #00d68f); }
+
+#sector-rank { font-size: 13px; }
+.sector-rank-item {
+  display: flex; justify-content: space-between;
+  padding: 3px 0;
+}
+.sector-rank-item .val.up { color: var(--up, #ff4d4f); }
+.sector-rank-item .val.down { color: var(--down, #00d68f); }
+
+/* 市场温度计占位 */
+#temp-gauge { font-size: 12px; color: var(--text-muted, #666); padding: 8px 0; }
+#temp-gauge .temp-empty { color: var(--text-muted, #666); font-size: 13px; }
+
+.gold-stocks-quick { overflow-x: auto; }
+.gold-quick-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+}
+.gold-quick-table th, .gold-quick-table td {
+  padding: 8px 10px; text-align: left;
+  border-bottom: 1px solid var(--border, #2a2a4a);
+  white-space: nowrap;
+}
+.gold-quick-table th {
+  color: var(--text-muted, #888); font-weight: 500;
+  background: var(--bg-secondary, #151528);
+  position: sticky; top: 0;
+}
+.gold-quick-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
+.gold-badge {
+  display: inline-block; padding: 2px 6px; border-radius: 4px;
+  font-size: 11px;
+}
+.gold-badge.strong { background: rgba(255,215,0,0.2); color: #ffd700; }
+.gold-badge.normal { background: rgba(100,100,100,0.2); color: #aaa; }
+
+.loading-text { color: var(--text-muted, #666); font-size: 14px; text-align: center; padding: 20px; }
+
+@media (max-width: 768px) {
+  .market-row { flex-direction: column; }
+}

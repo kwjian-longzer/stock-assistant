@@ -14,7 +14,9 @@ api_server.py — v4.0 API 服务（标准库 http.server）
   GET /api/dragon-tiger     — 龙虎榜
   GET /api/limit-up         — 涨停池
   GET /api/insights         — 市场洞见
-  GET /api/gold-stocks      — 金股推荐
+  GET /api/insights/latest   — 最新洞见（不限日期，自动取最近有数据的日期）
+  GET /api/gold-stocks       — 金股推荐
+  GET /api/gold-stocks/recent — 近期金股（最近N个推荐日，按入库时间排序）
   GET /api/reports          — 报告列表
   GET /api/calendar         — 财经日历
   GET /api/global           — 全球市场（美股/港股/外汇/商品）
@@ -192,6 +194,16 @@ def api_insights(query_params):
     return {"date": date, "count": len(rows), "by_category": by_category, "data": rows}
 
 
+def api_insights_latest(query_params):
+    """最新洞见（不限日期，自动取最近有洞见数据的日期）。
+    可选 ?period=morning|noon|evening & ?limit=50"""
+    db = get_db()
+    period = query_params.get("period", [None])[0]
+    limit = parse_int_param(query_params, "limit", 50)
+    rows = db.query_latest_insights(period=period, limit=limit)
+    return {"period": period, "count": len(rows), "data": rows}
+
+
 def api_gold_stocks(query_params):
     """金股推荐"""
     db = get_db()
@@ -199,6 +211,16 @@ def api_gold_stocks(query_params):
     limit = parse_int_param(query_params, "limit", 20)
     rows = db.query_gold_stock(date=date, limit=limit)
     return {"date": date, "count": len(rows), "data": rows}
+
+
+def api_gold_stocks_recent(query_params):
+    """近期金股（最近N个推荐日，按入库时间排序）。
+    可选 ?days=5 & ?limit=50"""
+    db = get_db()
+    days = parse_int_param(query_params, "days", 5)
+    limit = parse_int_param(query_params, "limit", 50)
+    rows = db.query_recent_gold_stocks(days=days, limit=limit)
+    return {"days": days, "count": len(rows), "data": rows}
 
 
 def api_reports(query_params):
@@ -281,7 +303,9 @@ ROUTES = {
     "/api/dragon-tiger": api_dragon_tiger,
     "/api/limit-up": api_limit_up,
     "/api/insights": api_insights,
+    "/api/insights/latest": api_insights_latest,
     "/api/gold-stocks": api_gold_stocks,
+    "/api/gold-stocks/recent": api_gold_stocks_recent,
     "/api/reports": api_reports,
     "/api/calendar": api_calendar,
     "/api/global": api_global,

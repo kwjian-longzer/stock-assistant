@@ -1024,6 +1024,8 @@ def main():
     parser.add_argument('--vip', action='store_true', help='只采集VIP文章')
     parser.add_argument('--depth', action='store_true', help='只采集深度头条')
     parser.add_argument('--calendar', action='store_true', help='只采集投资日历')
+    parser.add_argument('--discover-vip', action='store_true',
+                        help='v5: 仅对新加入的VIP文章逐篇执行v4股票发现引擎')
     parser.add_argument('--poll', action='store_true',
                         help='持续轮询模式：每15分钟采集电报，持续55分钟'
                              '（红色电报向后翻页回填24h）')
@@ -1078,6 +1080,21 @@ def main():
         print(f"{'='*60}")
         run_poll_mode(db, interval=args.interval, duration=args.duration,
                       collect_vip_too=True)
+        return
+
+    # v5: --discover-vip 模式 — 仅对新VIP文章执行股票发现
+    if args.discover_vip:
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"{'='*60}")
+        print(f"v5 VIP股票发现 — {now_str}")
+        print(f"{'='*60}")
+
+        # 先采集VIP文章
+        vip_result = collect_vip_articles(db)
+        # collect_vip_articles内部已对新文章调用discover_stocks_for_article
+        print(f"\n[VIP发现] 采集 {vip_result.get('fetched', 0)} 篇, "
+              f"新增 {vip_result.get('new_count', 0)} 篇, "
+              f"发现股票 {vip_result.get('stocks_discovered', 0)} 只")
         return
 
     # 默认采集全部

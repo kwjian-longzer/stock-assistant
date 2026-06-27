@@ -310,6 +310,31 @@ class DB:
             )
         """)
 
+        # 20. 个股资金流向（v5新增）
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS moneyflow (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_date TEXT NOT NULL,
+                ts_code TEXT NOT NULL,
+                name TEXT,
+                pct_chg REAL,
+                close REAL,
+                net_mf_amount REAL,
+                buy_sm_amount REAL,
+                sell_sm_amount REAL,
+                buy_md_amount REAL,
+                sell_md_amount REAL,
+                buy_lg_amount REAL,
+                sell_lg_amount REAL,
+                buy_elg_amount REAL,
+                sell_elg_amount REAL,
+                net_lg_amount REAL,
+                net_elg_amount REAL,
+                fetch_time TEXT DEFAULT (datetime('now','localtime')),
+                UNIQUE(trade_date, ts_code)
+            )
+        """)
+
         # gold_stock 扩展字段（ALTER ADD，幂等：仅添加尚不存在的列）
         self._alter_add_columns(cur, "gold_stock", {
             "catalyst": "TEXT",
@@ -339,7 +364,7 @@ class DB:
 
         conn.commit()
         conn.close()
-        print(f"[DB] 初始化完成: {self.db_path} (v4.0, 19表)")
+        print(f"[DB] 初始化完成: {self.db_path} (v5.0, 20表)")
 
     def _alter_add_columns(self, cur, table: str, columns: dict):
         """幂等地为表添加列（已存在的列跳过）"""
@@ -978,6 +1003,30 @@ class DB:
     def query_gold_stocks(self, limit=100) -> List[dict]:
         return self.query_gold_stock(limit=limit)
 
+    def query_recent_gold_stocks(self, days: int = 5, limit: int = 50) -> List[dict]:
+        """查询近期金股：取最近 days 个有数据的推荐日期，
+        按入库时间(recommend_date DESC, id DESC)排序。
+        用“最近N个推荐日”而非“最近N个自然日”，避免节假日/停更时返回空。"""
+        conn = self._conn()
+        cur = conn.execute(
+            "SELECT DISTINCT recommend_date FROM gold_stock "
+            "ORDER BY recommend_date DESC LIMIT ?",
+            (int(days),)
+        )
+        dates = [r[0] for r in cur.fetchall()]
+        if not dates:
+            conn.close()
+            return []
+        placeholders = ",".join("?" for _ in dates)
+        cur = conn.execute(
+            "SELECT * FROM gold_stock WHERE recommend_date IN (" + placeholders + ") "
+            "ORDER BY recommend_date DESC, id DESC LIMIT ?",
+            dates + [int(limit)]
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
     # ------------------------------------------------------------------
     # 钱三强选股结果
     # ------------------------------------------------------------------
@@ -1045,6 +1094,24 @@ class DB:
         rows = [dict(r) for r in cur.fetchall()]
         conn.close()
         return rows
+
+    def query_latest_insights(self, period: str = None, limit: int = 50) -> List[dict]:
+        """获取最新洞见（不限日期）：自动定位最近有洞见数据的日期。
+        period 可选 morning/noon/evening。"""
+        conn = self._conn()
+        if period:
+            cur = conn.execute(
+                "SELECT MAX(date) AS d FROM market_insight WHERE period=?",
+                (period,)
+            )
+            latest_date = cur.fetchone()["d"]
+        else:
+            cur = conn.execute("SELECT MAX(date) AS d FROM market_insight")
+            latest_date = cur.fetchone()["d"]
+        conn.close()
+        if not latest_date:
+            return []
+        return self.query_insights(date=latest_date, period=period)[:int(limit)]
 
     # ------------------------------------------------------------------
     # 报告记录
@@ -1136,6 +1203,54 @@ class DB:
                 params.append(sector)
             sql += " ORDER BY heat_score DESC"
             cur = conn.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
+    # ------------------------------------------------------------------
+    # 个股资金流向 (v5)
+    # ------------------------------------------------------------------
+
+    def upsert_moneyflow(self, items: list) -> int:
+        """items: [{trade_date, ts_code, name, pct_chg, close, net_mf_amount,
+                   buy_sm_amount, sell_sm_amount, buy_md_amount, sell_md_amount,
+                   buy_lg_amount, sell_lg_amount, buy_elg_amount, sell_elg_amount,
+                   net_lg_amount, net_elg_amount}, ...]"""
+        conn = self._conn()
+        n = 0
+        for it in items:
+            conn.execute(
+                "INSERT OR REPLACE INTO moneyflow "
+                "(trade_date, ts_code, name, pct_chg, close, net_mf_amount, "
+                " buy_sm_amount, sell_sm_amount, buy_md_amount, sell_md_amount, "
+                " buy_lg_amount, sell_lg_amount, buy_elg_amount, sell_elg_amount, "
+                " net_lg_amount, net_elg_amount) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (it.get("trade_date", ""), it.get("ts_code", ""), it.get("name", ""),
+                 it.get("pct_chg"), it.get("close"), it.get("net_mf_amount"),
+                 it.get("buy_sm_amount"), it.get("sell_sm_amount"),
+                 it.get("buy_md_amount"), it.get("sell_md_amount"),
+                 it.get("buy_lg_amount"), it.get("sell_lg_amount"),
+                 it.get("buy_elg_amount"), it.get("sell_elg_amount"),
+                 it.get("net_lg_amount"), it.get("net_elg_amount"))
+            )
+            n += 1
+        conn.commit()
+        conn.close()
+        return n
+
+    def query_moneyflow(self, date: str = None, ts_code: str = None,
+                        limit: int = 100) -> List[dict]:
+        conn = self._conn()
+        if ts_code:
+            sql = "SELECT * FROM moneyflow WHERE ts_code=? ORDER BY trade_date DESC LIMIT ?"
+            cur = conn.execute(sql, (ts_code, limit))
+        elif date:
+            sql = "SELECT * FROM moneyflow WHERE trade_date=? ORDER BY net_mf_amount DESC LIMIT ?"
+            cur = conn.execute(sql, (date, limit))
+        else:
+            sql = "SELECT * FROM moneyflow ORDER BY trade_date DESC, net_mf_amount DESC LIMIT ?"
+            cur = conn.execute(sql, (limit,))
         rows = [dict(r) for r in cur.fetchall()]
         conn.close()
         return rows
@@ -1355,7 +1470,7 @@ class DB:
             "dragon_tiger", "north_money", "margin", "cls_telegraph",
             "cls_telegraph_stock", "cls_vip_article", "vip_discovered_stock", "gold_stock",
             "market_insight", "report", "qian_sanqiang_result", "heat_tracking",
-            "learning_record", "website_snapshot", "calendar_event"
+            "learning_record", "website_snapshot", "calendar_event", "moneyflow"
         ]
         for table in tables:
             cur = conn.execute(f"SELECT COUNT(*) as cnt FROM {table}")

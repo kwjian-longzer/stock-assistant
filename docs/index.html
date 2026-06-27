@@ -58,12 +58,59 @@
 
     <div class="pages">
 
-      <!-- ===================== 1. 今日看板 ===================== -->
+      <!-- ===================== 1. 首页看板（三栏布局：观澜洞见 / 闲看潮涌 / 踏浪分金） ===================== -->
       <section id="page-dashboard" class="page active">
-        <div id="dash-situation"></div>
-        <div class="battlefield" id="dash-battlefield"></div>
-        <div class="metrics-strip" id="dash-metrics"></div>
-        <div id="dash-alerts"></div>
+        <!-- 观澜洞见：最优先展示每日洞见 -->
+        <div class="section-block guanlan-insights">
+          <h2 class="section-title">观澜洞见</h2>
+          <div class="insight-tabs">
+            <button class="insight-tab active" data-period="morning">盘前洞见</button>
+            <button class="insight-tab" data-period="noon">盘中洞见</button>
+            <button class="insight-tab" data-period="evening">盘后洞见</button>
+          </div>
+          <div id="insights-content" class="insights-content">
+            <p class="loading-text">加载中...</p>
+          </div>
+        </div>
+
+        <!-- 闲看潮涌：市场数据仪表盘 -->
+        <div class="section-block xiankan-chao">
+          <h2 class="section-title">闲看潮涌</h2>
+          <div class="market-dashboard">
+            <div class="market-row">
+              <div class="market-col" id="market-us">
+                <h3>隔夜美股</h3>
+                <div class="market-data" id="us-data"><p class="loading-text">加载中...</p></div>
+              </div>
+              <div class="market-col" id="market-asia">
+                <h3>亚太市场</h3>
+                <div class="market-data" id="asia-data"><p class="loading-text">加载中...</p></div>
+              </div>
+              <div class="market-col" id="market-ashare">
+                <h3>A股最新</h3>
+                <div class="market-data" id="ashare-data"><p class="loading-text">加载中...</p></div>
+              </div>
+            </div>
+            <div class="market-row">
+              <div class="market-half" id="market-temp">
+                <h3>市场温度</h3>
+                <div id="temp-gauge"></div>
+              </div>
+              <div class="market-half" id="sector-heat">
+                <h3>板块热度排行</h3>
+                <div id="sector-rank"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 踏浪分金：金股速览 -->
+        <div class="section-block talang-fenjin">
+          <h2 class="section-title">踏浪分金</h2>
+          <div id="gold-stocks-quick" class="gold-stocks-quick">
+            <p class="loading-text">加载中...</p>
+          </div>
+        </div>
       </section>
 
       <!-- ===================== 2. 日报归档 ===================== -->

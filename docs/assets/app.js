@@ -171,6 +171,24 @@
     return 'badge-cooling';
   }
 
+  // v5: 今日日期字符串 (YYYY-MM-DD)
+  function todayStr() {
+    var d = new Date();
+    var m = '' + (d.getMonth() + 1);
+    var day = '' + d.getDate();
+    return d.getFullYear() + '-' + (m.length < 2 ? '0' + m : m) + '-' + (day.length < 2 ? '0' + day : day);
+  }
+  // v5: 看板当前使用的日期 (优先 currentDate，其次 latestData.date，最后今天)
+  function dashboardDate() {
+    return appState.currentDate || (appState.latestData && appState.latestData.date) || todayStr();
+  }
+  // v5: 兼容提取列表 (API 返回 {data:[...]} 或裸数组)
+  function extractList(resp) {
+    if (Array.isArray(resp)) return resp;
+    if (resp && Array.isArray(resp.data)) return resp.data;
+    return [];
+  }
+
   /* ===================================================================
      内置回退数据 (data/ 目录无文件时使用, 保证站点开箱即用)
      结构与 data/latest.json / data/history/*.json 一致
@@ -666,12 +684,205 @@
      页面 1: 今日看板
      =================================================================== */
   function renderDashboard(data) {
-    data = data || appState.latestData || buildFallbackLatest();
-    renderSituationBanner(data);
-    renderBattlefield(data);
-    renderMetricsStrip(data);
-    renderAlerts(data);
+    // v5 三栏布局：观澜洞见 / 闲看潮涌 / 踏浪分金
+    renderGuanlanInsights();
+    renderMarketDashboard();
+    renderGoldStocksQuick();
+    // 保留原有的态势横幅等（如果对应元素仍存在）
+    if (document.getElementById('dash-situation') ||
+        document.getElementById('dash-battlefield') ||
+        document.getElementById('dash-metrics') ||
+        document.getElementById('dash-alerts')) {
+      data = data || appState.latestData || buildFallbackLatest();
+      renderSituationBanner(data);
+      renderBattlefield(data);
+      renderMetricsStrip(data);
+      renderAlerts(data);
+    }
   }
+
+  /* ---- v5 栏目一：观澜洞见 ---- */
+  var activeInsightPeriod = 'morning';  // 当前选中的洞见时段 (morning/noon/evening)
+
+  function renderGuanlanInsights() {
+    var container = document.getElementById('insights-content');
+    if (!container) return;
+    container.innerHTML = '<p class="loading-text">加载中...</p>';
+
+    // 无指定日期时优先使用 /api/insights/latest（取最新有数据的日期）
+    var date = appState.currentDate;
+    var url;
+    if (date) {
+      url = API_BASE + '/api/insights?date=' + encodeURIComponent(date) +
+            '&period=' + encodeURIComponent(activeInsightPeriod);
+    } else {
+      url = API_BASE + '/api/insights/latest?period=' + encodeURIComponent(activeInsightPeriod);
+    }
+
+    fetch(url + (url.indexOf('?') > -1 ? '&' : '?') + 't=' + Date.now())
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (resp) {
+        var list = extractList(resp);
+        if (list.length > 0) {
+          container.innerHTML = list.slice(0, 8).map(function (ins) {
+            var conf = String(ins.confidence || '').toLowerCase();
+            var confClass = conf === 'high' ? 'insight-cat-high' :
+                            conf === 'medium' ? 'insight-cat-medium' : 'insight-cat-low';
+            return '<div class="insight-item">' +
+              '<span class="insight-category ' + confClass + '">' + esc(ins.category || '洞见') + '</span>' +
+              '<span>' + esc(ins.signal_text || '') + '</span>' +
+              (ins.a_share_impact ? '<div style="color:var(--text-muted,#888);font-size:12px;margin-top:4px;">' +
+                esc(ins.a_share_impact) + '</div>' : '') +
+              '</div>';
+          }).join('');
+        } else {
+          container.innerHTML = '<p class="loading-text">暂无洞见数据</p>';
+        }
+      })
+      .catch(function () {
+        container.innerHTML = '<p class="loading-text">洞见数据加载失败</p>';
+      });
+  }
+
+  /* ---- v5 栏目二：闲看潮涌（市场数据仪表盘） ---- */
+  function renderMarketDashboard() {
+    var date = dashboardDate();
+
+    // 指数行情（美股 / 亚太 / A股）
+    fetch(API_BASE + '/api/indices?date=' + encodeURIComponent(date) + '&t=' + Date.now())
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (resp) {
+        var data = extractList(resp);
+        var usEl = document.getElementById('us-data');
+        var asiaEl = document.getElementById('asia-data');
+        var aEl = document.getElementById('ashare-data');
+        if (data.length === 0) {
+          if (usEl) usEl.innerHTML = '<p class="loading-text">暂无数据</p>';
+          if (asiaEl) asiaEl.innerHTML = '<p class="loading-text">暂无数据</p>';
+          if (aEl) aEl.innerHTML = '<p class="loading-text">暂无数据</p>';
+          return;
+        }
+        var usNames = ['道琼斯', '纳斯达克', '标普500'];
+        var asiaNames = ['恒生指数', '恒生科技', '日经225'];
+        var aNames = ['上证指数', '深证成指', '创业板指', '科创50'];
+
+        function renderList(names) {
+          var html = names.map(function (n) {
+            var idx = null;
+            for (var i = 0; i < data.length; i++) {
+              if (data[i] && data[i].name === n) { idx = data[i]; break; }
+            }
+            if (!idx) return '';
+            var pct = parseFloat(idx.pct_chg);
+            var cls = (!isNaN(pct) && pct > 0) ? 'up' : 'down';
+            return '<div class="market-item"><span class="name">' + esc(n) +
+              '</span><span class="val ' + cls + '">' +
+              (pct > 0 ? '+' : '') + (isNaN(pct) ? '--' : pct.toFixed(2)) + '%</span></div>';
+          }).join('');
+          return html;
+        }
+        if (usEl) usEl.innerHTML = renderList(usNames) || '<p class="loading-text">暂无数据</p>';
+        if (asiaEl) asiaEl.innerHTML = renderList(asiaNames) || '<p class="loading-text">暂无数据</p>';
+        if (aEl) aEl.innerHTML = renderList(aNames) || '<p class="loading-text">暂无数据</p>';
+      })
+      .catch(function () { /* 静默失败，保留 loading 提示 */ });
+
+    // 板块热度排行
+    fetch(API_BASE + '/api/sectors?date=' + encodeURIComponent(date) + '&top=8&t=' + Date.now())
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (resp) {
+        var el = document.getElementById('sector-rank');
+        if (!el) return;
+        var data = extractList(resp);
+        if (data.length === 0) { el.innerHTML = '<p class="loading-text">暂无数据</p>'; return; }
+        el.innerHTML = data.slice(0, 8).map(function (s, i) {
+          var net = parseFloat(s.net_mf_amount);
+          var cls = (!isNaN(net) && net > 0) ? 'up' : 'down';
+          return '<div class="sector-rank-item">' +
+            '<span>' + (i + 1) + '. ' + esc(s.industry || s.name || '') + '</span>' +
+            '<span class="val ' + cls + '">' + (net > 0 ? '+' : '') +
+            (isNaN(net) ? '--' : (net / 1e4).toFixed(1)) + '亿</span></div>';
+        }).join('');
+      })
+      .catch(function () { /* 静默失败 */ });
+
+    // 市场温度（沿用 latestData 的市场统计，无 API 时降级展示）
+    var tg = document.getElementById('temp-gauge');
+    if (tg) {
+      var d = appState.latestData || {};
+      var m = d.market || {};
+      var items = [];
+      if (m.limit_up != null) items.push({ k: '涨停', v: safe(m.limit_up, 0), c: 'up' });
+      if (m.limit_down != null) items.push({ k: '跌停', v: safe(m.limit_down, 0), c: 'down' });
+      if (m.volume) items.push({ k: '成交', v: esc(m.volume), c: '' });
+      tg.innerHTML = items.length ? items.map(function (it) {
+        return '<div class="market-item"><span class="name">' + it.k + '</span>' +
+          '<span class="val ' + it.c + '">' + it.v + '</span></div>';
+      }).join('') : '<div class="temp-empty">暂无温度数据</div>';
+    }
+  }
+
+  /* ---- v5 栏目三：踏浪分金（金股速览） ---- */
+  function renderGoldStocksQuick() {
+    var container = document.getElementById('gold-stocks-quick');
+    if (!container) return;
+    container.innerHTML = '<p class="loading-text">加载中...</p>';
+
+    // 无指定日期时使用 /api/gold-stocks/recent（最近5天）
+    var date = appState.currentDate;
+    var url;
+    if (date) {
+      url = API_BASE + '/api/gold-stocks?date=' + encodeURIComponent(date) + '&limit=10';
+    } else {
+      url = API_BASE + '/api/gold-stocks/recent?days=5&limit=10';
+    }
+
+    fetch(url + (url.indexOf('?') > -1 ? '&' : '?') + 't=' + Date.now())
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (resp) {
+        var list = extractList(resp);
+        if (list.length === 0) {
+          container.innerHTML = '<p class="loading-text">暂无金股推荐</p>';
+          return;
+        }
+        var html = '<table class="gold-quick-table"><thead><tr>' +
+          '<th>名称</th><th>代码</th><th>评分</th><th>共振</th>' +
+          '<th>维度</th><th>板块</th><th>买入区间</th><th>目标价</th>' +
+          '<th>强度</th><th>入库时间</th></tr></thead><tbody>';
+        list.slice(0, 10).forEach(function (g) {
+          var strength = g.strength || '关注';
+          var badge = strength === '重点关注' ? 'strong' : 'normal';
+          html += '<tr>' +
+            '<td>' + esc(g.name || '') + '</td>' +
+            '<td>' + esc(g.code || '') + '</td>' +
+            '<td>' + (g.score != null ? esc(g.score) : '--') + '</td>' +
+            '<td>' + esc(g.verification || '') + '</td>' +
+            '<td>' + esc(g.signal_source || g.reason || '') + '</td>' +
+            '<td>' + esc(g.dragon_vein || '-') + '</td>' +
+            '<td>' + esc(g.buy_range || '-') + '</td>' +
+            '<td>' + esc(g.target_price || '-') + '</td>' +
+            '<td><span class="gold-badge ' + badge + '">' + esc(strength) + '</span></td>' +
+            '<td>' + esc(g.recommend_date || '') + '</td>' +
+            '</tr>';
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+      })
+      .catch(function () {
+        container.innerHTML = '<p class="loading-text">金股数据加载失败</p>';
+      });
+  }
+
+  // 洞见 Tab 切换（事件委托：盘前/盘中/盘后）
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (t && t.classList && t.classList.contains('insight-tab')) {
+      document.querySelectorAll('.insight-tab').forEach(function (x) { x.classList.remove('active'); });
+      t.classList.add('active');
+      activeInsightPeriod = t.getAttribute('data-period') || 'morning';
+      renderGuanlanInsights();
+    }
+  });
 
   function renderSituationBanner(data) {
     var el = document.getElementById('dash-situation');

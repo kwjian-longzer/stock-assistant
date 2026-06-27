@@ -485,6 +485,169 @@ def send_summary_via_webhook(file_path):
 
 
 # ---------------------------------------------------------------------------
+# v5: 飞书文档创建（将报告MD转为飞书在线文档）
+# ---------------------------------------------------------------------------
+
+# 观澜踏浪项目飞书文件夹token
+FEISHU_PROJECT_FOLDER = "XJm7f2TlGliK0fdXCPLctUIpnMg"
+
+
+def create_feishu_doc(file_path):
+    """v5: 将报告MD文件导入为飞书在线文档
+
+    使用 lark-cli drive +import 将Markdown报告转为飞书Docx，
+    放入「观澜踏浪项目」文件夹。
+
+    Args:
+        file_path: 报告MD文件路径
+
+    Returns:
+        str: 飞书文档URL，失败返回None
+    """
+    import subprocess
+
+    filename = os.path.basename(file_path)
+    # 从文件名提取日期和类型 (如 2026-06-28_晨报.md)
+    name_without_ext = os.path.splitext(filename)[0]
+
+    print(f"\n[v5飞书文档] 创建飞书文档: {name_without_ext}")
+
+    try:
+        result = subprocess.run(
+            ["lark-cli", "drive", "+import",
+             "--file", file_path,
+             "--folder-token", FEISHU_PROJECT_FOLDER,
+             "--type", "docx",
+             "--name", f"观澜踏浪纪 — {name_without_ext}",
+             "--as", "user"],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode == 0:
+            # 从输出中提取文档URL/token
+            output = result.stdout + result.stderr
+            print(f"  [OK] 飞书文档创建成功")
+            # 尝试从输出提取token
+            import re
+            token_match = re.search(r'token[:\s]+([A-Za-z0-9]+)', output)
+            if token_match:
+                doc_token = token_match.group(1)
+                doc_url = f"https://ycnzu4p76s2k.feishu.cn/docx/{doc_token}"
+                print(f"  [OK] 文档链接: {doc_url}")
+                return doc_url
+            print(f"  [INFO] 输出: {output[:200]}")
+            return True
+        else:
+            print(f"  [WARN] 飞书文档创建失败: {result.stderr[:200]}")
+            return None
+    except FileNotFoundError:
+        print("  [WARN] lark-cli未安装，跳过飞书文档创建")
+        return None
+    except Exception as e:
+        print(f"  [WARN] 飞书文档创建异常: {e}")
+        return None
+
+
+def send_feishu_message_with_doc(file_path, doc_url=None):
+    """v5: 通过Webhook发送包含飞书文档链接的消息卡片
+
+    Args:
+        file_path: 报告文件路径
+        doc_url: 飞书文档URL（可选）
+
+    Returns:
+        bool: 是否发送成功
+    """
+    webhook = get_webhook()
+    if not webhook:
+        print("[WARN] 未配置Webhook，跳过消息发送")
+        return False
+
+    filename = os.path.basename(file_path)
+    date_str = filename.split('_')[0] if '_' in filename else ""
+    name_without_ext = os.path.splitext(filename)[0]
+
+    # 读取报告提取金股和摘要
+    gold_stocks = []
+    alerts_text = ""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # 提取金股
+        import re as _re
+        gold_section = _re.search(r'## .*?金股.*?\n(.*?)(?=\n## |\Z)', content, _re.DOTALL)
+        if gold_section:
+            for line in gold_section.group(1).split('\n'):
+                if '|' in line and '---' not in line and '名称' not in line:
+                    parts = [p.strip() for p in line.split('|')[1:-1]]
+                    if len(parts) >= 2 and parts[0]:
+                        gold_stocks.append(parts[:3])
+    except Exception:
+        pass
+
+    gold_lines = []
+    for g in gold_stocks[:3]:
+        gold_lines.append(f"• {g[0]} ({g[1]})")
+    gold_text = '\n'.join(gold_lines) if gold_lines else "暂无金股推荐"
+
+    SITE_URL = "https://kwjian-longzer.github.io/stock-assistant/"
+
+    payload = {
+        "msg_type": "interactive",
+        "card": {
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": f"📊 观澜踏浪纪 — {name_without_ext}"
+                },
+                "template": "blue"
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**📈 金股速览**\n{gold_text}"
+                    }
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "action",
+                    "actions": []
+                }
+            ]
+        }
+    }
+
+    # 添加按钮
+    actions = payload["card"]["elements"][2]["actions"]
+    actions.append({
+        "tag": "button",
+        "text": {"tag": "plain_text", "content": "📄 飞书文档"},
+        "url": doc_url or SITE_URL,
+        "type": "primary"
+    })
+    actions.append({
+        "tag": "button",
+        "text": {"tag": "plain_text", "content": "🌐 网站查看"},
+        "url": SITE_URL,
+        "type": "default"
+    })
+
+    try:
+        resp = requests.post(webhook, json=payload, timeout=30)
+        result = resp.json()
+        if result.get("code") == 0:
+            print(f"[OK] 飞书消息发送成功（含文档链接+网站链接）")
+            return True
+        else:
+            print(f"[WARN] 消息发送失败: {result}")
+            return False
+    except Exception as e:
+        print(f"[WARN] 消息发送异常: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
 # 钱三强选股结果MD文件生成
 # ---------------------------------------------------------------------------
 
@@ -878,12 +1041,20 @@ def push_to_feishu(file_path):
     date_str = base_name.split('_')[0] if '_' in base_name else ""
 
     # --- v3.0: 飞书只推链接+简报卡片，不再推送全文MD文件 ---
+    # v5: 新增飞书文档创建 + 消息发送（含文档链接）
     # 全文报告通过网站查看: https://kwjian-longzer.github.io/stock-assistant/
-    # site_builder会将报告转为JSON写入docs/data/，git push后GitHub Pages自动部署
 
     # --- 步骤1: 通过 Webhook 发送链接+简报卡片 ---
     print("\n[步骤1] 通过Webhook发送链接+简报卡片...")
     webhook_sent = send_summary_via_webhook(file_path)
+
+    # --- 步骤1.5(v5): 创建飞书在线文档 ---
+    print("\n[步骤1.5] v5: 创建飞书在线文档...")
+    feishu_doc_url = create_feishu_doc(file_path)
+    if feishu_doc_url:
+        # 有飞书文档时，额外发一条含文档链接的消息
+        print("\n[步骤1.6] v5: 发送飞书消息（含文档链接）...")
+        send_feishu_message_with_doc(file_path, feishu_doc_url)
 
     # --- 步骤3: v3.0 网站数据生成 ---
     # Bug#9修复: report_generator.finalize() 已在步骤4调用过 site_builder，
