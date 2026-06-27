@@ -678,19 +678,41 @@ def generate_heat_report_section(pro=None, stock_basic_list=None, sectors_config
 
 
 if __name__ == "__main__":
-    # 测试
-    print("=== 热度追踪器 v3 测试（动态选板块） ===\n")
+    import argparse
+    parser = argparse.ArgumentParser(description="板块热度追踪器 v5")
+    parser.add_argument('--export', action='store_true',
+                        help='导出热度数据到JSON + 写入DB（供定时任务调用）')
+    parser.add_argument('--test', action='store_true',
+                        help='运行测试（打印文本曲线图）')
+    args = parser.parse_args()
 
-    ts = _ensure_tushare()
-    ts.set_token(get_tushare_token())
-    pro = ts.pro_api()
+    if args.export:
+        # 定时任务模式：导出热度数据 + 写入DB
+        print("=== 热度追踪器 v5 — 导出模式 ===\n")
+        ts = _ensure_tushare()
+        ts.set_token(get_tushare_token())
+        pro = ts.pro_api()
 
-    from vip_extractor import load_stock_database
-    stock_db = load_stock_database(pro)
+        from vip_extractor import load_stock_database
+        stock_db = load_stock_database(pro)
 
-    # v3: 不传sectors_config，自动动态选择前线热点
-    chart = generate_heat_report_section(pro, stock_db, days=28)
-    print(chart)
+        # 生成热度数据并导出JSON + 写入DB
+        export_data = export_heat_data_json(pro=pro, stock_basic_list=stock_db)
+        print(f"\n[完成] 热度数据已导出并写入DB")
+    else:
+        # 默认/测试模式
+        print("=== 热度追踪器 v3 测试（动态选板块） ===\n")
+
+        ts = _ensure_tushare()
+        ts.set_token(get_tushare_token())
+        pro = ts.pro_api()
+
+        from vip_extractor import load_stock_database
+        stock_db = load_stock_database(pro)
+
+        # v3: 不传sectors_config，自动动态选择前线热点
+        chart = generate_heat_report_section(pro, stock_db, days=28)
+        print(chart)
 
 
 def export_heat_data_json(output_path=None, pro=None, stock_basic_list=None, sectors_config=None, days=28):

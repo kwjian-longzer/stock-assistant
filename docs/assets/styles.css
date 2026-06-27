@@ -702,3 +702,31 @@ body {
 @media (max-width: 768px) {
   .market-row { flex-direction: column; }
 }
+
+/* ===================================================================
+   v5: 图表切换按钮 (折线图 / 潮汐波浪图)
+   =================================================================== */
+.chart-toggle-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+.chart-toggle-btn {
+    padding: 4px 14px;
+    border: 1px solid var(--border-color, #2a2a4a);
+    background: transparent;
+    color: var(--text-muted, #888);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+.chart-toggle-btn:hover {
+    color: var(--text-primary, #ddd);
+    border-color: var(--text-secondary, #555);
+}
+.chart-toggle-btn.active {
+    background: var(--accent, #00f0ff);
+    color: #000;
+    border-color: var(--accent, #00f0ff);
+}

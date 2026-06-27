@@ -1358,8 +1358,11 @@
     var heat = (appState.historyData.heatTracking) || buildFallbackHeat();
     // tagbar
     renderSectorTagbar(heat);
-    // 图表
-    if (window.StockCharts) window.StockCharts.renderSectorCharts(heat, appState.hiddenSectors);
+    // 图表 (折线图 / 潮汐波浪图 切换)
+    var chartContainer = document.getElementById('sector-charts');
+    if (window.StockCharts && chartContainer) {
+      window.StockCharts.renderSectorChartsWithToggle(chartContainer, heat, appState.hiddenSectors);
+    }
     // 生命周期卡片 + 表
     renderLifecycle(heat);
   }

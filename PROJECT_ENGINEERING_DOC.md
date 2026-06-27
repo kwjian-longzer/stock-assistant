@@ -1,7 +1,7 @@
-# 观澜踏浪 — 工程白皮书 v4.0
+# 观澜踏浪 — 工程白皮书 v5.0
 
 > **本文档是「观澜踏浪」项目的阶段性工程总结，涵盖项目宪法、架构设计、开发历程、Bug修复记录与自我进化机制。**
-> 版本：v4.0（含进化引擎） ｜ 日期：2026-06-28 ｜ 仓库：github.com/kwjian-longzer/stock-assistant
+> 版本：v5.0（含7维共振引擎+热度追踪闭环+飞书文档集成+三栏首页） ｜ 日期：2026-06-28 ｜ 仓库：github.com/kwjian-longzer/stock-assistant
 
 ---
 
@@ -20,6 +20,16 @@
 - **周报**（周末）：主线叙事 + 板块轮动 + 下周展望，≥6000字
 
 龙脉定位体系：**潜龙在渊**（信号已现，市场未反应）/ **见龙在田**（多维验证通过）/ **飞龙在天**（市场共识，情绪高潮）
+
+#### v5.0 升级说明
+
+在 v4.0 进化引擎的基础上，v5.0 完成五项关键升级，使系统从"代码已写但未接入生产"升级为"全链路自动化运行 + 共振引擎重构 + 热度追踪闭环 + 飞书文档集成 + 三栏首页"：
+
+1. **7维共振金股发现引擎**：在原 5 维基础上重构为 7 维体系，权重重新校准——研报 40（最高）/ 钱三强 30 / 主力资金流入 15 / 涨停 15 / 龙虎榜 15 / 北向 10 / 舆情 10。新增"主力资金流入强度"维度（Tushare `moneyflow` 接口），并将"命中即固定加分"升级为"按金额/次数/连板的强度差异化打分"。
+2. **板块热度加权与退烧过滤**：金股打分接入 `heat_tracking` 板块生命周期数据——高潮板块 ×1.2 加分、崛起板块 ×1.0、退烧板块 ×0.5 降权，并通过过滤层直接排除退烧板块与 ST 风险股，避免推荐已进入退潮期的标的。
+3. **热度追踪闭环**：补全 `heat_tracker.py` 缺失的 DB 写入链路（`write_heat_to_db()` → `heat_tracking` 表），并新增 15:25 盘后定时任务（`heat_tracker.py --export`），让板块热度数据每日自动入库、自动被金股引擎消费，形成"采集 → 计算 → 入库 → 加权 → 过滤"的完整闭环。
+4. **飞书文档集成**：报告生成后由 `push_feishu.py` 调用 `lark-cli drive +import --type docx` 自动将 Markdown 报告转为飞书在线文档，放入「观澜踏浪项目」飞书文件夹，并通过消息卡片推送文档链接 + 网站链接 + 洞见摘要，实现"报告自动转飞书文档 + 消息推送"。
+5. **网站首页三栏布局**：首页从"今日看板"重构为三大栏目——**观澜洞见**（盘前/盘中/盘后三 Tab 切换，拉取最新洞见）/ **闲看潮涌**（隔夜美股、亚太、A股三栏实时数据 + 市场温度计 + 板块热度排行）/ **踏浪分金**（按入库时间倒序的增量金股速览表）。
 
 ### 1.2 项目宪法（红线规则）
 
@@ -51,21 +61,24 @@
 │  learning_loop.py — 预判验证 + 经验固化                   │
 ├─────────────────────────────────────────────────────────┤
 │  Layer 4: 前端展示层                                      │
-│  docs/ — 观澜看板 | 踏浪表单 | 数据页 | 历史回溯          │
+│  docs/ — 三栏首页（观澜洞见/闲看潮涌/踏浪分金）           │
+│        + 日报归档/板块热度/金股追踪/财联社/钱三强/投资日历  │
 ├─────────────────────────────────────────────────────────┤
 │  Layer 3: 后端服务层                                      │
-│  api_server.py — 15个REST端点，HTTP:8765                 │
+│  api_server.py — 17个REST端点，HTTP:8765                 │
 ├─────────────────────────────────────────────────────────┤
 │  Layer 2: 分析引擎层                                      │
 │  insight_engine.py | report_generator.py |              │
-│  gold_stock_discovery.py | vip_search_v4.py |            │
-│  heat_tracker.py | qian_sanqiang_selector.py             │
+│  gold_stock_discovery.py（7维共振金股引擎v5）|           │
+│  vip_search_v4.py | heat_tracker.py |                   │
+│  qian_sanqiang_selector.py                              │
 ├─────────────────────────────────────────────────────────┤
 │  Layer 1: 数据采集层                                      │
-│  data_collector.py (3时点) | cls_collector.py (每小时)   │
+│  data_collector.py (3时点+主力资金+钱三强) |             │
+│  cls_collector.py (每2小时 + VIP文章 + v4股票发现)        │
 ├─────────────────────────────────────────────────────────┤
 │  Foundation: 数据库层                                     │
-│  db.py — SQLite 19表 + get_or_fetch缓存                  │
+│  db.py — SQLite 20表 + get_or_fetch缓存                  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -75,24 +88,25 @@
 stock-assistant/
 ├── SKILL.md                    # 项目宪法 — 红线规则、历史教训（Agent首先必读）
 ├── PROJECT_ENGINEERING_DOC.md  # 本文件 — 工程白皮书
+├── UPGRADE_PLAN_v5.md          # v5升级计划书（P1/P2/P3问题与方案）
 ├── analysis_prompt.md          # 深度分析提示词 v4 — 报告写作规范
 ├── settings.py                 # 统一配置管理（环境变量/config.json）
 │
-├── db.py                       # SQLite数据库层（19表 + get_or_fetch缓存）
-├── data_collector.py           # 三时点数据采集（Sina+Tushare+东财）
-├── cls_collector.py            # 财联社电报采集（每小时 + VIP文章 + v4股票发现）
+├── db.py                       # SQLite数据库层（20表 + get_or_fetch缓存）
+├── data_collector.py           # 三时点数据采集（Sina+Tushare+东财）+ 主力资金 + 钱三强
+├── cls_collector.py            # 财联社电报采集（每2小时 + VIP文章 + v4股票发现）
 ├── insight_engine.py           # 洞见引擎（7维度分析 → market_insight + data_summary）
-├── gold_stock_discovery.py     # 金股共振发现（5维交叉 → gold_stock）
+├── gold_stock_discovery.py     # v5共振金股发现引擎（7维+加权+过滤+强度打分）
 ├── vip_search_v4.py            # v4多源VIP股票发现（东财+Web+研报+CLS）
 ├── vip_extractor.py            # VIP信息提取器（v4兼容入口）
-├── heat_tracker.py             # 板块热度追踪器
+├── heat_tracker.py             # 板块热度追踪器（计算+入库+导出）
 ├── qian_sanqiang_selector.py   # 钱三强选股器
 ├── report_generator.py         # 报告编排器（prepare→generate→finalize）
 ├── validate_report.py          # 报告校验器（10条红线校验）
 ├── report_quality_evaluator.py # 报告质量评分器
 ├── site_builder.py             # 网站数据生成器（MD→JSON→GitHub Pages）
-├── push_feishu.py              # 飞书推送器（Webhook卡片+链接）
-├── api_server.py               # REST API服务（15端点，:8765）
+├── push_feishu.py              # 飞书推送器（Webhook卡片+飞书文档+消息卡片）
+├── api_server.py               # REST API服务（17端点，:8765）
 ├── gold_stock_backtest.py     # 金股回测引擎
 ├── learning_loop.py            # v4学习闭环（验证→固化→回测→进化→外部学习→持久化）
 ├── backfill_telegraphs.py      # 电报回填工具
@@ -116,9 +130,9 @@ stock-assistant/
 │   └── EVOLUTION_ENGINE_DESIGN.md # 进化引擎设计文档
 │
 ├── docs/                       # 前端网站（GitHub Pages托管）
-│   ├── index.html             # 主页面（SPA）
+│   ├── index.html             # 主页面（SPA，三栏首页）
 │   ├── assets/                # 前端资源
-│   │   ├── app.js             # 应用逻辑
+│   │   ├── app.js             # 应用逻辑（renderInsights/renderMarketDashboard/renderGoldStocksTable）
 │   │   ├── charts.js          # 图表（ECharts）
 │   │   └── styles.css         # 样式
 │   └── data/                  # 网站数据（site_builder生成）
@@ -127,9 +141,10 @@ stock-assistant/
 │       └── archive/           # 历史报告归档
 │
 ├── data/                       # 运行时数据
-│   ├── stock.db               # SQLite数据库（19表）
+│   ├── stock.db               # SQLite数据库（20表）
 │   ├── data_summary.json      # 洞见引擎产出的数据摘要
-│   ├── gold_stocks.json       # 金股JSON
+│   ├── gold_stocks.json       # 金股JSON（含v5共振维度+板块生命周期）
+│   ├── heat_data.json         # 板块热度数据
 │   └── cls_telegraph_archive/ # 电报归档
 │
 └── templates/                  # 模板
@@ -144,14 +159,33 @@ stock-assistant/
 
 **技术栈**：原生HTML + JavaScript + ECharts图表库 + CSS3
 
-**页面结构**：
-- **观澜看板**：最新报告全文展示，支持Markdown渲染
-- **踏浪表单**：金股推荐表，含买入区间/目标价/止损位
-- **数据页**：指数行情、板块资金、龙虎榜、涨停池数据可视化
-- **历史回溯**：日历选择器，按日期回溯历史报告
-- **时间前瞻**：未来重要事件时间线
+**首页三栏布局（v5重构）**：
 
-**数据来源**：前端通过 `fetch('/api/...')` 调用后端REST API获取实时数据，同时 `docs/data/` 下的静态JSON作为GitHub Pages降级方案。
+```
+┌─────────────────────────────────────────────────────┐
+│  观澜洞见（最优先展示）                                │
+│  ┌─────────┬─────────┬─────────┐                   │
+│  │ 盘前洞见 │ 盘中洞见 │ 盘后洞见 │  ← 三Tab切换      │
+│  └─────────┴─────────┴─────────┘                   │
+├─────────────────────────────────────────────────────┤
+│  闲看潮涌（市场数据仪表盘）                            │
+│  ┌──────────┬──────────┬──────────┐                │
+│  │ 隔夜美股  │ 亚太市场  │ A股最新  │  ← 三栏实时数据  │
+│  ├──────────┴──────────┴──────────┤                │
+│  │ 市场温度计  │  板块热度排行     │  ← 仪表盘+排行    │
+│  └───────────────────────────────┘                │
+├─────────────────────────────────────────────────────┤
+│  踏浪分金（金股速览）                                  │
+│  ┌────┬────┬────┬────┬────┐                       │
+│  │名称│代码│维度│评分│入库时间│  ← 增量金股表格        │
+│  └────┴────┴────┴────┴────┘                       │
+└─────────────────────────────────────────────────────┘
+```
+
+**保留的子页面（侧边栏）**：
+- 日报归档、板块热度、金股追踪、财联社信源、钱三强选股、投资日历
+
+**数据来源**：前端通过 `fetch('/api/...')` 调用后端REST API获取实时数据，同时 `docs/data/` 下的静态JSON作为GitHub Pages降级方案。首页三栏分别通过 `/api/insights/latest`、`/api/index/{date}`、`/api/gold-stocks/recent` 获取数据。
 
 **部署方式**：GitHub Pages自动部署。`site_builder.py` 将报告转为JSON写入 `docs/data/`，git push后GitHub Pages自动更新。
 
@@ -159,7 +193,7 @@ stock-assistant/
 
 **技术栈**：Python `http.server`（轻量HTTP服务，无需额外依赖）
 
-**15个REST端点**：
+**17个REST端点**（v5新增 `/api/insights/latest` 与 `/api/gold-stocks/recent` 两个端点以支撑三栏首页）：
 
 | 端点 | 方法 | 功能 |
 |------|------|------|
@@ -173,6 +207,8 @@ stock-assistant/
 | `/api/limit-up/{date}` | GET | 涨停池 |
 | `/api/gold-stocks/{date}` | GET | 金股推荐 |
 | `/api/insights/{date}` | GET | 市场洞见 |
+| `/api/insights/latest` | GET | 最新洞见（不限日期，自动取最近有数据的日期） ★v5新增 |
+| `/api/gold-stocks/recent` | GET | 近期金股（最近N个推荐日，按入库时间排序） ★v5新增 |
 | `/api/reports/{date}` | GET | 报告列表 |
 | `/api/report/{date}/{period}` | GET | 指定报告内容 |
 | `/api/telegraphs` | GET | 最新电报 |
@@ -225,21 +261,70 @@ stock-assistant/
 - MCP模式：49.8秒完成，有研粉材排名#1（140分）
 - MCP模式快17.8%，结果一致性100%
 
-### 4.3 金股共振发现（gold_stock_discovery.py）
+### 4.3 金股共振发现引擎 v5（gold_stock_discovery.py）
 
-**功能**：跨5维DB表交叉验证，发现多维共振金股
+> **v5 完全重写**：从 v4 的"5维命中即固定加分"升级为"7维体系 + 2加权层 + 1过滤层 + 强度差异化打分"。
 
-**5个维度**：
+**功能**：跨7维DB表交叉验证，发现多维共振金股，写入 `gold_stock` 表与 `data/gold_stocks.json`。
 
-| 维度 | 权重 | 数据源 |
-|------|------|--------|
-| 涨停 | 25 | limit_up表 |
-| 龙虎榜 | 25 | dragon_tiger表 |
-| 北向资金 | 20 | north_money表 |
-| 舆情 | 15 | cls_telegraph表 |
-| 研报 | 15 | vip_discovered_stock表 |
+#### 4.3.1 七维权重表
 
-**流程**：全市场扫描 → 5维命中 → ≥2维共振纳入候选 → 按评分排序 → Top N写入gold_stock表 + gold_stocks.json
+| # | 维度 | 基础权重 | 数据源 | 强度打分规则 |
+|---|------|----------|--------|--------------|
+| 1 | 研报覆盖 | **40**（最高） | vip_discovered_stock | 每篇研报 +5，上限 +20（总60） |
+| 2 | 钱三强 | **30** | qian_sanqiang_result | 三强全命中 +10，两强命中 +5 |
+| 3 | 主力资金流入 | 15 | moneyflow（★v5新增） | (超大单净额+大单净额/2)/亿×2，上限 +15 |
+| 4 | 涨停动量 | 15 | limit_up | 连板数×5（1板5/2板10/3板+15） |
+| 5 | 龙虎榜资金 | 15 | dragon_tiger | 净买入金额/亿×3，上限 +15 |
+| 6 | 北向资金 | 10 | north_money | 净流入/10亿×2，上限 +10 |
+| 7 | 舆情催化 | 10 | cls_telegraph | 电报条数×1 + 红色标记×3，上限 +10 |
+
+> 维度 1、2 为**核心维度**（高权重，候选股至少命中 1 个核心维度才纳入候选）。
+> 维度 3-7 为**加分维度**，采用强度差异化打分（命中仅得基础分，金额/次数/连板越多加分越高）。
+
+#### 4.3.2 加权层（2层）
+
+| 加权项 | 规则 | 说明 |
+|--------|------|------|
+| W1. 板块热度加权 | 高潮板块 ×1.2 / 崛起板块 ×1.0 / 退烧板块 ×0.5 | 读取 `heat_tracking` 表板块生命周期，通过 `SECTOR_NAME_MAP` 映射股票行业→板块 |
+| W2. 多维共振加成 | 命中 ≥4维 → 额外 +20；命中 ≥5维 → 额外 +35 | 鼓励多维度共振标的 |
+
+#### 4.3.3 过滤层（1层）
+
+| 过滤项 | 规则 |
+|--------|------|
+| F1. 周期退烧排除 | 候选股所属板块处于"退烧"状态 → 默认排除（可配置 `--keep-decline` 仅警示保留⚠️） |
+| F2. ST/退市风险排除 | ST / *ST / 退市风险警示股直接排除 |
+
+#### 4.3.4 候选门槛
+
+| 条件 | 阈值 |
+|------|------|
+| 最低共振维度 | ≥2 维命中，且核心维度至少命中 1 个 |
+| 最低评分 | 加权后 ≥30 分 |
+| Top N | 默认 5 只 |
+
+#### 4.3.5 打分流水线
+
+```
+全市场扫描 → 7维数据读取
+  ↓
+逐股调用7个强度打分函数 → raw_score（基础分+加分）+ hit_count（命中维度数）+ core_hit
+  ↓
+候选门槛：hit_count≥2 且 core_hit=True → 否则丢弃
+  ↓
+加权层1：apply_sector_heat_weight(raw_score, lifecycle)   ← 高潮×1.2/退烧×0.5
+  ↓
+加权层2：apply_resonance_bonus(score, hit_count)           ← ≥4维+20 / ≥5维+35
+  ↓
+过滤层：should_exclude(code, name, lifecycle)              ← 退烧/ST排除
+  ↓
+评分门槛：final_score≥30 → 否则丢弃
+  ↓
+按 (score, resonance) 排序 → Top N 写入 gold_stock 表 + gold_stocks.json
+```
+
+**输出增强**：`gold_stocks.json` 每只金股携带 `raw_score` / `weighted_score` / `resonance`（命中维度数）/ `dimensions`（命中维度列表）/ `sector_lifecycle` / `strength_detail`（每维度 base/bonus/total 明细），便于前端与回测消费。
 
 ### 4.4 报告编排器（report_generator.py）
 
@@ -249,7 +334,7 @@ stock-assistant/
 prepare(date, period)
   ├── data_collector.py    # 数据采集
   ├── insight_engine.py    # 洞见生成
-  ├── gold_stock_discovery.py  # 金股发现
+  ├── gold_stock_discovery.py  # 金股发现（v5共振引擎）
   └── 组装 data/report_request.json  # 报告数据包
 
 generate(date, period)
@@ -261,7 +346,7 @@ finalize(report_path, date, period)
   ├── report_quality_evaluator.py  # 2.评分
   ├── db.upsert_report()      # 3.写入DB
   ├── site_builder.py         # 4.刷新网站
-  ├── push_feishu.py          # 5.推送飞书
+  ├── push_feishu.py          # 5.推送飞书（v5：转飞书文档+消息卡片）
   └── learning_loop.py        # 6.触发学习（盘后）
 ```
 
@@ -364,22 +449,34 @@ db.get_or_fetch(source, api_name,  # 缓存优先的数据获取
 db.upsert_insight(item)            # 写入洞见
 db.upsert_gold_stock(item)         # 写入金股
 db.upsert_learning_record(item)    # 写入学习记录
+db.upsert_moneyflow(items)         # 写入主力资金流向（v5新增）
+db.upsert_heat_tracking(items)     # 写入板块热度追踪
 db.query_insights(date=...)        # 查询洞见
+db.query_moneyflow(date=...)       # 查询主力资金（v5新增）
+db.query_heat_tracking(date=...)   # 查询板块热度
 db.query_resonance(date=...)       # 共振分析查询
 ```
 
-**19张表**：raw_cache / index_quote / sector_moneyflow / limit_up / dragon_tiger / north_money / margin / cls_telegraph / cls_telegraph_stock / vip_article / vip_discovered_stock / gold_stock / market_insight / report / qian_sanqiang / sector_heat / learning_record / website_snapshot / report_score
+**20张表**（v5新增 `moneyflow`）：raw_cache / index_quote / sector_moneyflow / limit_up / dragon_tiger / north_money / margin / cls_telegraph / cls_telegraph_stock / cls_vip_article / vip_discovered_stock / gold_stock / market_insight / report / qian_sanqiang_result / heat_tracking / learning_record / website_snapshot / calendar_event / **moneyflow**（v5新增）
 
 ### 5.2 定时任务接口
 
-| 时间 | 任务 | 命令 |
-|------|------|------|
-| 08:30 | 晨报采集+生成 | `python report_generator.py --period morning --auto` |
-| 11:50 | 午报采集+生成 | `python report_generator.py --period noon --auto` |
-| 15:30 | 晚报采集+生成 | `python report_generator.py --period evening --auto` |
-| 每小时 | 财联社电报采集 | `python cls_collector.py` |
-| 盘后 | 学习闭环 | `python learning_loop.py` (由finalize自动触发) |
-| 周末 | 周报生成 | `python report_generator.py --period weekly_sat/sun --auto` |
+v5 任务体系由 v3.2 的 6 个旧任务重建为 **10 个 v5 任务**（详见第九节升级记录），分 A 类（洞见生成类，观澜踏浪纪）与 B 类（数据采集分析类）：
+
+| 时间 | 任务 | 类型 | 触发内容 / 命令 |
+|------|------|------|------|
+| 08:30（工作日） | 观澜踏浪纪-盘前 | A | `report_generator.py --period morning` 全流程（采集→洞见→金股→Agent写报告→入库→转飞书文档→发消息） |
+| 12:30（工作日） | 观澜踏浪纪-盘中 | A | `report_generator.py --period noon` 全流程 |
+| 16:00（工作日） | 观澜踏浪纪-盘后 | A | `report_generator.py --period evening` 全流程 + 盘后学习闭环 |
+| 11:50（工作日） | 钱三强选股-盘中 | B | `python data_collector.py --period qian_sanqiang` |
+| 15:30（工作日） | 钱三强选股-盘后 | B | `python data_collector.py --period qian_sanqiang` |
+| 15:25（工作日） | 板块热度追踪 | B | `python heat_tracker.py --export`（写入 heat_tracking 表）★v5新增 |
+| 每2小时 | 财联社增量采集 | B | `python cls_collector.py --poll --interval 900 --duration 3300` |
+| 财联社后30分钟 | VIP股票发现 | B | `python cls_collector.py --discover-vip` ★v5新增 |
+| 20:00（周六） | 观澜踏浪纪-周报 | A | `report_generator.py --period weekly_sat` |
+| 20:00（周日） | 观澜踏浪纪-周报 | A | `report_generator.py --period weekly_sun` |
+
+> 热度追踪任务安排在 15:25，先于 15:30 的钱三强选股与 16:00 的盘后金股发现，确保 `heat_tracking` 表已写入板块生命周期，金股引擎可读取并执行热度加权与退烧过滤。
 
 ### 5.3 MCP工具集成
 
@@ -394,6 +491,7 @@ db.query_resonance(date=...)       # 共振分析查询
 - **Tushare Token**：环境变量 `TUSHARE_TOKEN` 或 `config.json`
 - **飞书Webhook**：环境变量 `FEISHU_WEBHOOK` 或 `config.json`
 - **飞书App**：`FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_CHAT_ID`
+- **飞书文档文件夹**：`XJm7f2TlGliK0fdXCPLctUIpnMg`（「观澜踏浪项目」文件夹，v5新增）
 - **网站URL**：默认 `https://kwjian-longzer.github.io/stock-assistant/`
 
 敏感信息存储在 `config.json`（.gitignore排除），确保仓库可安全公开。
@@ -409,7 +507,7 @@ db.query_resonance(date=...)       # 共振分析查询
 **代码管理**：GitHub仓库 `kwjian-longzer/stock-assistant`，所有代码和知识文件版本控制
 
 **开发流程**：
-1. 需求分析 → 设计文档（如PROJECT_PLAN_v4.md）
+1. 需求分析 → 设计文档（如UPGRADE_PLAN_v5.md）
 2. 编码实现 → 语法验证（py_compile）
 3. 端到端测试 → 验证输出正确性
 4. Git commit + push → 代码同步
@@ -422,9 +520,16 @@ db.query_resonance(date=...)       # 共振分析查询
 2. `git push` 后GitHub Pages自动部署
 3. 前端通过静态JSON + REST API双通道获取数据
 
+**飞书文档部署（v5新增）**：
+1. 报告 `finalize` 阶段触发 `push_feishu.create_feishu_doc()`
+2. 调用 `lark-cli drive +import --type docx` 将 Markdown 报告转为飞书在线文档
+3. 文档放入「观澜踏浪项目」飞书文件夹（token: `XJm7f2TlGliK0fdXCPLctUIpnMg`）
+4. 通过 `send_feishu_message_with_doc()` 发送消息卡片（含文档链接 + 网站链接 + 洞见摘要）
+5. `lark-cli` 未安装时自动降级为仅 Webhook 卡片推送，不阻断流程
+
 **定时任务部署**：
-- TRAE Work Schedule定时任务触发报告生成
-- 每小时电报采集通过独立定时任务
+- TRAE Work Schedule定时任务触发报告生成（v5重建为10个任务）
+- 财联社采集每2小时触发一次
 - 盘后学习由报告finalize自动触发
 
 **API服务部署**：
@@ -439,12 +544,14 @@ db.query_resonance(date=...)       # 共振分析查询
 - 预判准确率趋势（`accuracy_benchmark.json`）
 - 进化引擎运行日志（stdout输出）
 - git push 成功/失败日志
+- **`heat_tracking` 表监控（v5新增）**：每日 15:25 后检查板块热度是否正常入库（非空 + 板块数≥10），空表则告警，避免金股引擎因缺热度数据退化为无加权模式
 
 **故障恢复**：
 - 每个组件try/except包裹，局部失败不阻断整体
 - get_or_fetch缓存优先，API故障时使用缓存数据
 - v4降级v3：vip_search_v4不可用时自动回退到v3搜索
 - 进化引擎shadow模式：新规则先在shadow环境验证，不影响生产
+- **金股引擎降级**（v5）：`heat_tracking` 表为空时跳过板块热度加权，仅按7维原始分排序，不阻断选股
 
 ### 6.4 自我迭代升级机制
 
@@ -476,9 +583,10 @@ db.query_resonance(date=...)       # 共振分析查询
 |------|------|
 | Python | 3.8+ |
 | 依赖 | tushare, requests（标准库优先） |
-| 数据库 | SQLite（内置，无需安装） |
+| 数据库 | SQLite（内置，无需安装，20表 + get_or_fetch缓存） |
 | 外部API | Tushare Pro Token（必需）、飞书Webhook（可选） |
 | MCP | mcp_tushareMcp, mcp_fxbaogao, integrated_browser |
+| lark-cli | 飞书文档集成（v5，可选，未安装时降级Webhook） |
 | 托管 | GitHub Pages（免费） |
 
 ### 7.2 启动流程
@@ -571,7 +679,7 @@ python api_server.py --port 8765 &
 
 ### 8.1 开发思路
 
-**从脚本到系统**：v3.2是"脚本拼凑"（各自调API→JSON文件），v4.0升级为"系统工程"（数据库驱动 + 信号驱动推理链）。
+**从脚本到系统**：v3.2是"脚本拼凑"（各自调API→JSON文件），v4.0升级为"系统工程"（数据库驱动 + 信号驱动推理链），v5.0进一步升级为"全链路自动化 + 共振引擎重构 + 闭环补全"。
 
 **核心设计决策**：
 1. **DB中心化**：所有数据流经SQLite，避免文件I/O竞争和格式不一致
@@ -579,6 +687,7 @@ python api_server.py --port 8765 &
 3. **Agent为主路径**：TRAE内置最强模型撰写报告，外部LLM API仅作降级
 4. **OpenClaw式进化**：学习成果持久化到GitHub，实现跨会话继承
 5. **MCP双模式**：Agent模式（MCP传入数据）和独立模式（HTTP降级），兼顾性能和可用性
+6. **闭环优先（v5）**：算法实现后必须补全 DB 写入与定时任务，杜绝"接口先行、实现缺失"
 
 ### 8.2 开发过程
 
@@ -591,14 +700,17 @@ python api_server.py --port 8765 &
 6. 学习闭环：新增盘后验证+经验固化
 7. 进化引擎：六阶段闭环 + 外部学习 + 知识持久化
 
-**v4 VIP股票发现**：
-1. v3：Tushare主营业务 + fxbaogao两层搜索
-2. v4：新增东财公告API + WebSearch + CLS电报 + 加权验证 + 排除逻辑
-3. MCP双模式：Agent传入MCP数据 vs HTTP API降级
+**v4.0 → v5.0 演进**：
+1. 数据库扩展：19表→20表，新增 `moneyflow` 主力资金流向表
+2. 共振引擎重构：5维→7维（新增主力资金流入维度），权重重排（研报10→40），打分方式从固定加分升级为强度差异化打分
+3. 板块热度闭环：补全 `heat_tracker.py` 的 `write_heat_to_db()`，新增 15:25 定时任务，金股引擎接入热度加权与退烧过滤
+4. 飞书文档集成：`push_feishu.py` 新增 `create_feishu_doc()` + `send_feishu_message_with_doc()`
+5. 网站首页改版：三栏布局（观澜洞见/闲看潮涌/踏浪分金）+ 新增 2 个 API 端点
+6. 任务体系重建：6 个旧 v3.2 任务 → 10 个 v5 新任务
 
 ### 8.3 发现的Bug与修复过程
 
-本轮审计发现10个Bug（1个误判已撤回），全部修复：
+**v4 审计**：本轮审计发现10个Bug（1个误判已撤回），全部修复：
 
 | Bug# | 级别 | 文件 | 问题 | 修复方案 |
 |------|------|------|------|----------|
@@ -613,8 +725,21 @@ python api_server.py --port 8765 &
 | #10 | P2 | gold_stock_discovery.py | JSON写入原始candidate缺buy_range | 改为写入enriched item |
 | #12 | P3 | api_server.py | log_message中args[0]/args[1]可能越界 | 增加len检查 |
 
+**v5 修复项**（针对 UPGRADE_PLAN_v5 审查发现的 P1/P2/P3 三大问题）：
+
+| Bug# | 级别 | 文件/模块 | 问题 | 修复方案 |
+|------|------|-----------|------|----------|
+| v5-1 | P0 | heat_tracker.py | `heat_tracking` DB表始终为空（`upsert_heat_tracking` 全项目无人调用） | 新增 `write_heat_to_db()`，在 `export_heat_data_json()` 末尾调用，写入板块热度+生命周期 |
+| v5-2 | P0 | gold_stock_discovery.py | 5维权重倒挂（研报最低10应为最高）+ 无强度打分 + 无板块热度/退烧过滤 | 全面重构为7维共振引擎v5（权重重排+强度差异化打分+加权层+过滤层） |
+| v5-3 | P1 | db.py | 缺主力资金数据源 | 新增 `moneyflow` 表 + `upsert_moneyflow()` / `query_moneyflow()` |
+| v5-4 | P1 | data_collector.py | 钱三强无定时任务、选股结果过期 | 新增 `--period qian_sanqiang` 定时调用（盘中11:50+盘后15:30） |
+| v5-5 | P1 | push_feishu.py | 仅发Webhook卡片，不创建飞书Docx | 新增 `create_feishu_doc()`（lark-cli drive +import）+ `send_feishu_message_with_doc()` |
+| v5-6 | P1 | api_server.py | 缺首页三栏所需端点 | 新增 `/api/insights/latest` + `/api/gold-stocks/recent` |
+| v5-7 | P1 | cls_collector.py | `--poll`每小时触发过频、VIP文章发现未独立 | `--poll` 改为每2小时 + 新增 `--discover-vip` 独立触发 |
+| v5-8 | P1 | 定时任务体系 | 6个旧v3.2任务时点错误、缺热度/钱三强/VIP任务 | 重建为10个v5新任务（A类洞见+B类采集） |
+
 **修复原则**：
-- 每个修复都保留v3降级路径，确保可用性
+- 每个修复都保留降级路径，确保可用性
 - 修复后全部通过py_compile语法验证
 - 修复代码内嵌注释标注Bug编号，便于追溯
 
@@ -634,17 +759,74 @@ python api_server.py --port 8765 &
 
 7. **Shadow部署降低风险**：新规则先在shadow模式运行3天，确认优于production后才切换，退化时自动回滚。
 
+8. **集成检查清单机制（v5）**：每个新模块开发完成后，必须通过 6 项集成检查——①DB写入（是否有函数调用 `db.upsert_*()`）②定时任务（是否在 Schedule 中创建）③下游消费（是否被 gold_stock_discovery / report_generator 引用）④API暴露（是否在 api_server.py 有端点）⑤前端展示（是否在 app.js 有渲染函数）⑥端到端测试（从采集到展示的完整链路）。heat_tracker"算法已实现但 DB 表为空"的教训正是缺少此清单所致。
+
+9. **热度追踪闭环（v5）**：算法实现后必须同步补全 DB 写入与定时任务，否则上游算得再准也无人消费。v5 通过 `write_heat_to_db()` + 15:25 定时任务 + 金股引擎读取 `heat_tracking`，将"独立模块"接入"采集→计算→入库→加权→过滤"完整闭环。
+
+10. **飞书文档集成（v5）**：借助 `lark-cli drive +import --type docx` 实现报告自动转飞书在线文档，配合消息卡片推送文档链接，使报告从"网站查看"扩展为"飞书群直达"，提升触达率；lark-cli 未安装时自动降级为 Webhook 卡片，保证可用性。
+
 ---
 
-## 九、未来展望
+## 九、v5.0升级记录
+
+本节记录 v4.0 → v5.0 的完整升级内容，对应 `UPGRADE_PLAN_v5.md` 审查发现的 P1（自动化任务未重组）、P2（共振选股逻辑缺陷）、P3（板块热度追踪未固化）三大问题。
+
+### 9.1 升级项对照表
+
+| 升级项 | 旧版（v4.0） | 新版（v5.0） |
+|--------|------|------|
+| 金股维度 | 5维 | 7维（新增主力资金流入） |
+| 研报权重 | 10（最低） | 40（最高） |
+| 打分方式 | 固定加分 | 强度差异化打分 |
+| 板块热度 | 未接入 | 高潮×1.2 / 退烧×0.5 |
+| 退烧过滤 | 无 | 退烧板块排除 + ST排除 |
+| heat_tracking表 | 空表 | 补全DB写入（write_heat_to_db） |
+| 定时任务 | 6个旧v3.2 | 10个v5新任务 |
+| 飞书推送 | 仅Webhook卡片 | 飞书文档+消息卡片 |
+| 网站首页 | 今日看板 | 观澜洞见/闲看潮涌/踏浪分金（三栏） |
+| DB表数 | 19表 | 20表（新增moneyflow） |
+| API路由 | 15个 | 17个（新增insights/latest + gold-stocks/recent） |
+
+### 9.2 升级要点说明
+
+1. **7维共振金股发现引擎**：新增"主力资金流入强度"维度（Tushare `moneyflow` 接口 → DB `moneyflow` 表），并引入板块热度加权层（高潮×1.2/崛起×1.0/退烧×0.5）与多维共振加成层（≥4维+20 / ≥5维+35），过滤层排除退烧板块与ST股。候选门槛：≥2维命中（核心至少1个）+ 评分≥30。
+
+2. **热度追踪闭环**：`heat_tracker.py` 新增 `write_heat_to_db()`，在 `export_heat_data_json()` 末尾将板块热度+生命周期写入 `heat_tracking` 表；新增 15:25 盘后定时任务触发 `heat_tracker.py --export`，确保金股引擎（16:00 盘后）可读取最新板块生命周期执行加权与过滤。
+
+3. **飞书文档集成**：`push_feishu.py` 新增 `create_feishu_doc()`（`lark-cli drive +import --type docx`）与 `send_feishu_message_with_doc()`，报告 finalize 阶段自动转飞书在线文档并推送消息卡片；lark-cli 缺失时降级 Webhook。
+
+4. **网站首页三栏**：`docs/index.html` 重构为观澜洞见/闲看潮涌/踏浪分金三栏，`app.js` 新增 `renderInsights()` / `renderMarketDashboard()` / `renderGoldStocksTable()`，对应新增 `/api/insights/latest` 与 `/api/gold-stocks/recent` 端点。
+
+5. **任务体系重建**：6 个旧 v3.2 任务（时点错误、走旧流程）重建为 10 个 v5 新任务，分 A 类洞见生成（观澜踏浪纪盘前/盘中/盘后 + 周六/周日周报）与 B 类数据采集（财联社每2小时、VIP股票发现、钱三强盘中/盘后、板块热度追踪）。
+
+### 9.3 v5 新增/修改文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `gold_stock_discovery.py` | 全面重构：7维 + 2加权层 + 1过滤层 + 强度打分函数 |
+| `heat_tracker.py` | 新增 `write_heat_to_db()`，补全 heat_tracking DB写入 |
+| `db.py` | 新增 `moneyflow` 表 + `upsert_moneyflow()` / `query_moneyflow()` |
+| `data_collector.py` | 新增主力资金采集 + `--period qian_sanqiang` |
+| `push_feishu.py` | 新增 `create_feishu_doc()` + `send_feishu_message_with_doc()` |
+| `api_server.py` | 新增 `/api/insights/latest` + `/api/gold-stocks/recent`（17端点） |
+| `cls_collector.py` | `--poll` 改2小时 + 新增 `--discover-vip` |
+| `docs/index.html` | 首页三栏布局重构 |
+| `docs/assets/app.js` | 新增三栏渲染函数 |
+| `docs/assets/styles.css` | 三栏样式 |
+| `PROJECT_ENGINEERING_DOC.md` | 更新v5架构说明（本文件） |
+
+---
+
+## 十、未来展望
 
 1. **L3逻辑迭代深化**：引入组合因子检测（如北向+涨停共振时额外加分），自适应阈值调整
-2. **前端增强**：实时数据推送（WebSocket），交互式图表，移动端适配
+2. **前端增强**：实时数据推送（WebSocket），交互式图表，移动端适配，潮汐波浪式板块热度可视化
 3. **多市场扩展**：港股、美股市场数据接入和跨市场关联分析
 4. **Agent协同**：多个专项Agent协同工作（数据采集Agent / 分析Agent / 报告撰写Agent）
 5. **知识图谱**：将lessons_learned结构化为知识图谱，支持语义查询和自动推理
+6. **共振引擎持续进化**：基于金股回测结果动态调整7维权重与加权/过滤参数（接入进化引擎L1参数调优）
 
 ---
 
-> 本文档由「观澜踏浪」项目团队于 2026-06-28 编制，作为 v4.0 阶段性工程总结。
+> 本文档由「观澜踏浪」项目团队于 2026-06-28 编制，作为 v5.0 阶段性工程总结。
 > 仓库地址：https://github.com/kwjian-longzer/stock-assistant

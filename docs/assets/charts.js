@@ -112,12 +112,16 @@
 
   /**
    * 渲染板块热度三图
+   * @param {HTMLElement} container - 图表容器(可选, 缺省回退到 #sector-charts)
    * @param {Object} heatData  - { date_labels:[], sectors:[{name, heat_series, capital_series, limit_series, current_heat, lifecycle}] }
    * @param {Array}  hiddenSet - 被隐藏的板块名称列表
    */
-  function renderSectorCharts(heatData, hiddenSet) {
+  function renderSectorCharts(container, heatData, hiddenSet) {
     disposeAll();
-    var container = document.getElementById('sector-charts');
+    // 兼容: 未传入 container 或传入的并非 DOM 元素时, 回退到 #sector-charts
+    if (!container || typeof container.appendChild !== 'function') {
+      container = document.getElementById('sector-charts');
+    }
     if (!container) return;
     container.innerHTML = '';
 
@@ -212,6 +216,161 @@
     }
   }
 
+  /**
+   * 渲染潮汐波浪式可视化 (面积图模拟潮汐波浪)
+   * 参考: Guanlan 项目 OceanWaveChart 设计
+   * 正热度暖色(涨潮), 负热度冷色(退潮), 以平滑面积图叠加形成潮汐效果
+   * @param {HTMLElement} container - 图表容器
+   * @param {Object} heatData - { date_labels:[], sectors:[{name, heat_series, current_heat, lifecycle}] }
+   * @returns {Object} echarts 实例
+   */
+  function renderWaveChart(container, heatData) {
+    if (!container || !heatData || !heatData.sectors) return;
+
+    // 容器隐藏(display:none)时 echarts 取到 0 尺寸, 这里兜底给一个高度
+    if (!container.style.height && !container.offsetHeight) {
+      container.style.height = '460px';
+    }
+
+    var chart = echarts.init(container, null, { renderer: 'svg' });
+
+    // 构建波浪式面积图series
+    var series = heatData.sectors.map(function (sec, i) {
+      var heatData_series = sec.heat_series || [];
+      // 确定颜色: 正热度暖色, 负热度冷色
+      var currentHeat = sec.current_heat || 0;
+      var color = currentHeat > 50 ? '#ff6b6b' :
+                  currentHeat > 0 ? '#ffa500' :
+                  currentHeat > -30 ? '#4ecdc4' : '#45b7d1';
+
+      return {
+        name: sec.name,
+        type: 'line',
+        data: heatData_series,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { width: 0 },
+        areaStyle: {
+          opacity: 0.3,
+          color: {
+            type: 'linear',
+            x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: color + 'CC' },
+              { offset: 1, color: color + '11' }
+            ]
+          }
+        },
+        emphasis: {
+          focus: 'series',
+          lineStyle: { width: 2, opacity: 1 },
+          areaStyle: { opacity: 0.5 }
+        }
+      };
+    });
+
+    var option = {
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' },
+        formatter: function (params) {
+          var html = params[0].axisValueLabel + '<br/>';
+          params.sort(function (a, b) { return b.value - a.value; });
+          params.forEach(function (p) {
+            var lifecycle = '';
+            var sec = heatData.sectors.find(function (s) { return s.name === p.seriesName; });
+            if (sec && sec.lifecycle) {
+              lifecycle = ' [' + (sec.lifecycle.state || '') + ']';
+            }
+            html += p.marker + ' ' + p.seriesName + ': ' +
+                    (p.value > 0 ? '+' : '') + p.value + lifecycle + '<br/>';
+          });
+          return html;
+        }
+      },
+      legend: {
+        data: heatData.sectors.map(function (s) { return s.name; }),
+        textStyle: { color: '#aaa', fontSize: 11 },
+        type: 'scroll',
+        bottom: 0
+      },
+      grid: { left: '3%', right: '4%', bottom: '15%', top: '5%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        boundaryGap: false,
+        data: heatData.date_labels || [],
+        axisLabel: { color: '#666', fontSize: 11 }
+      },
+      yAxis: {
+        type: 'value',
+        min: -100,
+        max: 100,
+        axisLabel: { color: '#666' },
+        splitLine: { lineStyle: { color: '#222' } }
+      },
+      series: series
+    };
+
+    chart.setOption(option);
+    // 纳入统一生命周期管理, 便于 resize / dispose
+    instances.push(chart);
+    return chart;
+  }
+
+  /**
+   * 渲染板块图表并附带 [折线图 / 潮汐波浪图] 切换按钮
+   * @param {HTMLElement} container - 外层容器(通常为 #sector-charts)
+   * @param {Object} heatData - 板块热度数据
+   * @param {Array} hiddenSectors - 被隐藏的板块名称列表
+   */
+  function renderSectorChartsWithToggle(container, heatData, hiddenSectors) {
+    if (!container) return;
+    // 渲染切换按钮
+    var toggleHtml = '<div class="chart-toggle-bar">' +
+      '<button class="chart-toggle-btn active" data-mode="lines">折线图</button>' +
+      '<button class="chart-toggle-btn" data-mode="wave">潮汐波浪图</button>' +
+      '</div>' +
+      '<div id="chart-lines-mode"></div>' +
+      '<div id="chart-wave-mode" style="display:none;height:460px;"></div>';
+    container.innerHTML = toggleHtml;
+
+    // 渲染折线图模式(原有逻辑)
+    var linesContainer = document.getElementById('chart-lines-mode');
+    if (linesContainer) {
+      renderSectorCharts(linesContainer, heatData, hiddenSectors);
+    }
+
+    // 渲染波浪图模式
+    var waveContainer = document.getElementById('chart-wave-mode');
+    var waveChart = null;
+    if (waveContainer) {
+      waveChart = renderWaveChart(waveContainer, heatData);
+    }
+
+    // 切换逻辑
+    container.querySelectorAll('.chart-toggle-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        container.querySelectorAll('.chart-toggle-btn').forEach(function (b) {
+          b.classList.remove('active');
+        });
+        btn.classList.add('active');
+        var mode = btn.getAttribute('data-mode');
+        var linesEl = document.getElementById('chart-lines-mode');
+        var waveEl = document.getElementById('chart-wave-mode');
+        if (mode === 'wave') {
+          if (linesEl) linesEl.style.display = 'none';
+          if (waveEl) waveEl.style.display = 'block';
+          // 波浪图初始化时容器处于隐藏状态, 切换为可见后需 resize 以适配真实尺寸
+          if (waveChart) { try { waveChart.resize(); } catch (e) {} }
+        } else {
+          if (linesEl) linesEl.style.display = 'block';
+          if (waveEl) waveEl.style.display = 'none';
+        }
+      });
+    });
+  }
+
   // 响应式 resize
   window.addEventListener('resize', function () {
     instances.forEach(function (c) { try { c.resize(); } catch (e) {} });
@@ -220,6 +379,8 @@
   // 暴露接口
   window.StockCharts = {
     renderSectorCharts: renderSectorCharts,
+    renderWaveChart: renderWaveChart,
+    renderSectorChartsWithToggle: renderSectorChartsWithToggle,
     disposeAll: disposeAll
   };
 })();
