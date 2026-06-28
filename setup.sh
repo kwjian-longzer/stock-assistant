@@ -31,6 +31,19 @@ else
     echo "[OK] config.json 已存在，跳过"
 fi
 
+# 如果 GIT_TOKEN 环境变量存在，将其添加到 config.json（供 push_feishu.py 使用）
+if [ -n "$GIT_TOKEN" ] && [ -f config.json ]; then
+    python3 -c "
+import json
+with open('config.json') as f:
+    cfg = json.load(f)
+cfg['git_token'] = '$GIT_TOKEN'
+with open('config.json', 'w') as f:
+    json.dump(cfg, f, indent=2)
+print('[OK] git_token 已写入 config.json')
+" 2>/dev/null || echo "[WARN] git_token 写入 config.json 失败"
+fi
+
 # ----------------------------------------------------------
 # 1b. 配置 git remote（确保 push 可用）
 # ----------------------------------------------------------

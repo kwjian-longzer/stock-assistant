@@ -906,6 +906,30 @@ def git_commit_and_push(report_path):
             print(f"  [ERROR] git {' '.join(args)} 异常: {e}")
             return None
 
+    # 确保 git remote 有认证 token（用于 push）
+    remote_check = run_git(["remote", "get-url", "origin"])
+    if remote_check and remote_check.stdout and "x-access-token" not in remote_check.stdout:
+        # 尝试从 config.json 读取 git_token
+        git_token = ""
+        config_path = os.path.join(script_dir, "config.json")
+        if os.path.exists(config_path):
+            try:
+                with open(config_path) as f:
+                    cfg = json.load(f)
+                git_token = cfg.get("git_token", "")
+            except Exception:
+                pass
+        # 尝试从 GIT_TOKEN 环境变量读取
+        if not git_token:
+            git_token = os.environ.get("GIT_TOKEN", "")
+        # 配置 remote URL
+        if git_token:
+            auth_url = f"https://x-access-token:{git_token}@github.com/kwjian-longzer/stock-assistant.git"
+            run_git(["remote", "set-url", "origin", auth_url])
+            print("  [OK] git remote 已配置认证token")
+        else:
+            print("  [WARN] 无认证token，git push 可能失败")
+
     # 检查是否在 git 仓库中
     rev_parse = run_git(["rev-parse", "--git-dir"])
     if not rev_parse or rev_parse.returncode != 0:
