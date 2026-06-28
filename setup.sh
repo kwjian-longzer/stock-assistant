@@ -32,6 +32,18 @@ else
 fi
 
 # ----------------------------------------------------------
+# 1b. 配置 git remote（确保 push 可用）
+# ----------------------------------------------------------
+if [ -n "$GIT_TOKEN" ]; then
+    git remote set-url origin "https://x-access-token:${GIT_TOKEN}@github.com/kwjian-longzer/stock-assistant.git" 2>/dev/null
+    echo "[OK] git remote 已从 GIT_TOKEN 配置认证token"
+elif git remote get-url origin 2>/dev/null | grep -q "x-access-token"; then
+    echo "[OK] git remote 已包含认证token，跳过"
+else
+    echo "[WARN] GIT_TOKEN 未设置，git push 可能失败"
+fi
+
+# ----------------------------------------------------------
 # 2. 安装 Python 依赖
 # ----------------------------------------------------------
 echo ""
