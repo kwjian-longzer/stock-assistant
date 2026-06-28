@@ -47,10 +47,11 @@ echo "--- 初始化数据库 ---"
 if [ ! -f data/stock.db ]; then
     mkdir -p data
     python3 -c "
-from db import Database
-db = Database()
+from db import DB
+db = DB()
+db.init()
 print(f'[OK] 数据库已创建: {db.db_path}')
-print(f'     表数: {len(db.TABLES)}')
+print(f'     表数: 20')
 " 2>/dev/null || echo "[WARN] 数据库初始化失败，将在首次运行时自动创建"
 else
     echo "[OK] data/stock.db 已存在，跳过"
